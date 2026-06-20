@@ -214,7 +214,8 @@ create table wb_finance (
   storage_fee                 numeric(12,2),      -- Хранение
   deduction                   numeric(12,2),      -- Удержания
   acceptance                  numeric(12,2),      -- Приёмка
-  created_at                  timestamptz default now()
+  created_at                  timestamptz default now(),
+  unique (store_id, rrd_id)   -- нужно для upsert в sync.ts
 );
 
 create index idx_wb_finance_store_period on wb_finance(store_id, date_from, date_to);

@@ -1,6 +1,6 @@
 /**
  * WB Analytics — API Route для синхронизации
- * Вызывается Vercel Cron каждые 30 минут
+ * Вызывается Vercel Cron каждые 120 минут
  *
  * GET /api/sync — запустить синхронизацию
  */

@@ -3,9 +3,10 @@
  * Документация: https://dev.wildberries.ru/docs
  */
 
-const WB_STATS_URL = 'https://statistics-api.wildberries.ru'
-const WB_CONTENT_URL = 'https://content-api.wildberries.ru'
-const WB_ADV_URL = 'https://advert-api.wildberries.ru'
+const WB_STATS_URL     = 'https://statistics-api.wildberries.ru'
+const WB_CONTENT_URL   = 'https://content-api.wildberries.ru'
+const WB_ADV_URL       = 'https://advert-api.wildberries.ru'
+const WB_ANALYTICS_URL = 'https://seller-analytics-api.wildberries.ru'
 
 // ---------- Типы данных ----------
 
@@ -61,6 +62,8 @@ export interface WBSale {
   forPay: number
   finishedPrice: number
   priceWithDisc: number
+  spp: number
+  gNumber: string
   srid: string
 }
 
@@ -118,37 +121,145 @@ export interface WBFinanceRow {
   supplier_oper_name: string
 }
 
+export interface WBIncome {
+  incomeId: number
+  date: string
+  lastChangeDate: string
+  supplierArticle: string
+  techSize: string
+  barcode: string
+  quantity: number
+  totalPrice: number
+  dateClose: string
+  warehouseName: string
+  nmId: number
+  status: string
+}
+
+export interface WBAdCampaign {
+  advertId: number
+  name: string
+  type: number
+  status: number
+  dailyBudget: number
+  createTime: string
+  changeTime: string
+  startTime: string
+  endTime: string
+}
+
+export interface WBAdSpendFull {
+  advertId: number
+  begin: string
+  end: string
+  nm: Array<{
+    nmId: number
+    name: string
+    views: number
+    clicks: number
+    ctr: number
+    cpc: number
+    sum: number
+    atbs: number
+    orders: number
+    cr: number
+    shks: number
+    sum_price: number
+  }>
+}
+
+export interface WBProduct {
+  nmID: number
+  imtID: number
+  vendorCode: string
+  brand: string
+  title: string
+  description: string
+  photos: Array<{ big: string; c246x328: string }>
+  video: string
+  dimensions: { length: number; width: number; height: number; isValid: boolean }
+  characteristics: Array<{ id: number; name: string; value: string[] }>
+  sizes: Array<{
+    chrtID: number
+    techSize: string
+    wbSize: string
+    skus: string[]
+    price: number
+    discountedPrice: number
+  }>
+  tags: Array<{ id: number; name: string; color: string }>
+  createdAt: string
+  updatedAt: string
+  subjectID: number
+  subjectName: string
+}
+
 export interface WBAdSpend {
   updNum: string
-  updTime: string
+  updTime: string | null
   updSum: number
   advertId: number
   campName: string
   advertType: number
   paymentType: string
-  status: number
-  days: Array<{
-    date: string
-    apps: Array<{
-      appType: number
-      nm: Array<{
-        nmId: number
-        views: number
-        clicks: number
-        frq: number
-        ctr: number
-        sum: number
-        atbs: number
-        orders: number
-        cr: number
-        shks: number
-        sum_price: number
-      }>
-    }>
-  }>
+  advertStatus: number
+}
+
+// /adv/v3/fullstats response
+export interface WBAdStatDay {
+  date: string
+  views: number
+  clicks: number
+  ctr: number
+  orders: number
+  sum: number       // spend
+  sum_price: number // orders sum
+  shks: number
+  atbs: number
+}
+
+export interface WBAdStatCampaign {
+  advertId: number
+  views: number
+  clicks: number
+  ctr: number
+  orders: number
+  sum: number
+  sum_price: number
+  shks: number
+  atbs: number
+  days: WBAdStatDay[]
+}
+
+// ---------- Воронка продаж ----------
+
+export interface WBFunnelDay {
+  date: string
+  openCount: number
+  cartCount: number
+  orderCount: number
+  orderSum: number
+  buyoutCount: number
+  buyoutSum: number
+  buyoutPercent: number
+  addToCartConversion: number
+  cartToOrderConversion: number
+  addToWishlistCount: number
+}
+
+export interface WBFunnelItem {
+  product: {
+    nmId: number
+    vendorCode: string
+  }
+  history: WBFunnelDay[]
 }
 
 // ---------- Базовый клиент ----------
+
+const MAX_RETRIES = 4
+
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
 class WBApiClient {
   private apiKey: string
@@ -158,21 +269,43 @@ class WBApiClient {
   }
 
   private async fetch<T>(url: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Authorization': this.apiKey,
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    })
+    let attempt = 0
+    while (true) {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': this.apiKey,
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`WB API Error ${response.status}: ${errorText}`)
+      // Проактивное торможение: если осталось мало токенов — пауза 200мс
+      const remaining = parseInt(response.headers.get('x-ratelimit-remaining') ?? '99', 10)
+      if (remaining <= 2 && response.ok) {
+        await sleep(200)
+      }
+
+      if (response.status === 429) {
+        attempt++
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`WB API 429: превышен лимит запросов после ${MAX_RETRIES} попыток`)
+        }
+        // Читаем X-Ratelimit-Retry — официальная рекомендация из документации
+        const retryAfter = parseInt(response.headers.get('x-ratelimit-retry') ?? '10', 10)
+        const waitMs = (retryAfter + 1) * 1000 * Math.pow(2, attempt - 1) // exponential backoff
+        console.warn(`[wb-api] 429 → ждём ${waitMs / 1000}с (попытка ${attempt}/${MAX_RETRIES})`)
+        await sleep(waitMs)
+        continue
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`WB API Error ${response.status}: ${errorText}`)
+      }
+
+      return response.json() as Promise<T>
     }
-
-    return response.json() as Promise<T>
   }
 
   /**
@@ -218,13 +351,107 @@ class WBApiClient {
   }
 
   /**
-   * Получить расходы на рекламу
-   * @param dateFrom - дата начала YYYY-MM-DD
-   * @param dateTo - дата окончания YYYY-MM-DD
+   * История затрат по всем кампаниям за период (агрегировано, без детализации по дням)
+   * Параметры: from / to (YYYY-MM-DD), макс. 31 день, лимит 1 req/sec
    */
-  async getAdSpend(dateFrom: string, dateTo: string): Promise<WBAdSpend[]> {
-    const url = `${WB_ADV_URL}/adv/v1/upd?dateFrom=${dateFrom}&dateTo=${dateTo}`
+  async getAdSpend(from: string, to: string): Promise<WBAdSpend[]> {
+    const url = `${WB_ADV_URL}/adv/v1/upd?from=${from}&to=${to}`
     return this.fetch<WBAdSpend[]>(url)
+  }
+
+  /**
+   * Статистика кампаний с детализацией по дням (v3)
+   * GET /adv/v3/fullstats?ids=id1,id2&beginDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   * Макс. 50 кампаний за запрос, макс. 31 день, лимит 3 req/min
+   */
+  async getAdStatsCampaigns(
+    campaignIds: number[],
+    beginDate: string,
+    endDate: string,
+  ): Promise<WBAdStatCampaign[]> {
+    const ids = campaignIds.join(',')
+    const url = `${WB_ADV_URL}/adv/v3/fullstats?ids=${ids}&beginDate=${beginDate}&endDate=${endDate}`
+    return this.fetch<WBAdStatCampaign[]>(url)
+  }
+
+  /**
+   * Получить список активных рекламных кампаний
+   */
+  async getAdCampaigns(): Promise<WBAdCampaign[]> {
+    const url = `${WB_ADV_URL}/adv/v1/promotion/count`
+    const data = await this.fetch<{ adverts?: Array<{ advertList: WBAdCampaign[]; status: number; type: number }> }>(url)
+    return (data.adverts ?? []).flatMap(g => g.advertList ?? [])
+  }
+
+  /**
+   * Получить детальную статистику по кампании за период (v2)
+   * @param campaignId - ID кампании
+   * @param dateFrom - YYYY-MM-DD
+   * @param dateTo - YYYY-MM-DD
+   */
+  async getAdSpendFull(campaignId: number, dateFrom: string, dateTo: string): Promise<WBAdSpendFull | null> {
+    const url = `${WB_ADV_URL}/adv/v2/fullstats`
+    try {
+      const data = await this.fetch<WBAdSpendFull[]>(url, {
+        method: 'POST',
+        body: JSON.stringify([{ id: campaignId, dates: [dateFrom, dateTo] }]),
+      })
+      return data?.[0] ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Получить поставки на склады WB
+   */
+  async getIncomes(dateFrom: string): Promise<WBIncome[]> {
+    const url = `${WB_STATS_URL}/api/v1/supplier/incomes?dateFrom=${dateFrom}`
+    return this.fetch<WBIncome[]>(url)
+  }
+
+  /**
+   * Воронка продаж за период (seller-analytics-api)
+   * @param nmIds - артикулы WB (до 20 за запрос)
+   * @param startDate - YYYY-MM-DD
+   * @param endDate   - YYYY-MM-DD
+   * Max период: 365 дней назад от текущей даты
+   */
+  async getFunnelHistory(nmIds: number[], startDate: string, endDate: string): Promise<WBFunnelItem[]> {
+    const url = `${WB_ANALYTICS_URL}/api/analytics/v3/sales-funnel/products/history`
+    const data = await this.fetch<WBFunnelItem[] | { data?: WBFunnelItem[] }>(url, {
+      method: 'POST',
+      body: JSON.stringify({
+        selectedPeriod: { start: startDate, end: endDate },
+        nmIds,
+        skipDeletedNm: false,
+        aggregationLevel: 'day',
+      }),
+    })
+    return Array.isArray(data) ? data : (data?.data ?? [])
+  }
+
+  /**
+   * Получить карточки товаров из Content API (постранично)
+   */
+  async getProducts(cursor?: { updatedAt?: string; nmID?: number }): Promise<{
+    cards: WBProduct[]
+    cursor: { updatedAt: string; nmID: number; total: number }
+  }> {
+    const url = `${WB_CONTENT_URL}/content/v2/get/cards/list`
+    return this.fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({
+        settings: {
+          cursor: {
+            limit: 100,
+            ...(cursor?.updatedAt ? { updatedAt: cursor.updatedAt } : {}),
+            ...(cursor?.nmID ? { nmID: cursor.nmID } : {}),
+          },
+          filter: { withPhoto: -1 },
+        },
+      }),
+    })
   }
 }
 
