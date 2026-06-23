@@ -107,7 +107,7 @@ async function initialOrders(store: { id: string; wb_token: string }, log: (m: s
         cancel_dt: o.cancel_dt || null,
       }))
       for (const chunk of chunkArray(rows, 500)) {
-        await db.from('wb_orders').upsert(chunk, { onConflict: 'store_id,g_number', ignoreDuplicates: true })
+        await db.from('wb_orders').upsert(chunk, { onConflict: 'store_id,g_number,nm_id,barcode,date', ignoreDuplicates: true })
       }
     }
     await logSync(db, store.id, 'orders', dateFrom, dateTo, orders?.length ?? 0, Date.now() - t0)

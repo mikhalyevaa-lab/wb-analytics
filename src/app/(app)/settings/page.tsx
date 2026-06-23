@@ -2,6 +2,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase-server'
 import { getUserStoreIds, getStores } from '@/lib/queries'
 import { SettingsForm } from '@/components/settings/settings-form'
+import { StoreSettingsForm } from '@/components/settings/store-settings-form'
+import { DataQuality } from '@/components/settings/data-quality'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +21,7 @@ export default async function SettingsPage() {
 
   const { data: storeData } = await db
     .from('stores')
-    .select('id, name, wb_token')
+    .select('id, name, wb_token, wb_analytics_token')
     .eq('id', primaryStore.id)
     .single()
 
@@ -39,8 +42,20 @@ export default async function SettingsPage() {
         storeId={primaryStore.id}
         storeName={storeData?.name || ''}
         wbToken={storeData?.wb_token || ''}
+        wbAnalyticsToken={storeData?.wb_analytics_token || ''}
         telegramChatId={profile?.telegram_chat_id?.toString() || null}
       />
+
+      <StoreSettingsForm />
+
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
+          <CardTitle className="text-base">Качество данных</CardTitle>
+        </CardHeader>
+        <CardContent className="p-5">
+          <DataQuality />
+        </CardContent>
+      </Card>
     </div>
   )
 }

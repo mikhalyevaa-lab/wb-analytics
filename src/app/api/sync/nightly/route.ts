@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { recalcAllStoresAggregates, syncAllStores } from '@/lib/sync'
 
+export const maxDuration = 300
+
 // Ночной cron 3:00 UTC — синхронизация + пересчёт агрегатов
 // Vercel Cron: schedule "0 3 * * *"
 export async function GET(req: NextRequest) {

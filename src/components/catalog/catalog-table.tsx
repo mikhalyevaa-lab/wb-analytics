@@ -27,6 +27,8 @@ export interface CatalogProduct {
   avg_orders_per_day: number | null
   buyout_rate: number | null
   product_groups: { id: string; name: string; color: string } | null
+  days_of_stock: number | null
+  empty_date: string | null
 }
 
 export interface ProductGroup {
@@ -49,6 +51,7 @@ export const ALL_COLUMNS = [
   { key: 'avg_price_after_spp', label: 'Цена после СПП', sortable: true },
   { key: 'avg_orders_per_day', label: 'Заказов/день', sortable: true },
   { key: 'current_stock', label: 'Остаток', sortable: true },
+  { key: 'empty_date', label: 'Пустой склад', sortable: true },
   { key: 'stock_cost_value', label: 'Себест. остатков', sortable: true },
   { key: 'stock_retail_value', label: 'Стоим. остатков (до СПП)', sortable: true },
 ] as const
@@ -58,7 +61,7 @@ export type ColumnKey = typeof ALL_COLUMNS[number]['key']
 export const DEFAULT_COLUMNS: ColumnKey[] = [
   'photo', 'nm_id', 'vendor_code', 'subject_name', 'group',
   'buyout_rate', 'avg_price_before_spp', 'avg_price_after_spp', 'avg_orders_per_day',
-  'current_stock', 'stock_cost_value', 'stock_retail_value',
+  'current_stock', 'empty_date', 'stock_cost_value', 'stock_retail_value',
 ]
 
 export interface Filters {
@@ -141,6 +144,7 @@ function applyFilters(products: CatalogProduct[], filters: Filters): CatalogProd
 function computedVal(p: CatalogProduct, key: ColumnKey): number | null {
   if (key === 'stock_cost_value') return p.cost_price != null ? (p.current_stock ?? 0) * p.cost_price : null
   if (key === 'stock_retail_value') return p.avg_price_before_spp != null ? (p.current_stock ?? 0) * p.avg_price_before_spp : null
+  if (key === 'empty_date') return p.days_of_stock
   return null
 }
 
@@ -149,7 +153,7 @@ function sortProducts(products: CatalogProduct[], key: SortKey, dir: SortDir): C
   return [...products].sort((a, b) => {
     let av: unknown, bv: unknown
     if (key === 'group') { av = a.product_groups?.name ?? ''; bv = b.product_groups?.name ?? '' }
-    else if (key === 'stock_cost_value' || key === 'stock_retail_value') { av = computedVal(a, key); bv = computedVal(b, key) }
+    else if (key === 'stock_cost_value' || key === 'stock_retail_value' || key === 'empty_date') { av = computedVal(a, key); bv = computedVal(b, key) }
     else { av = (a as unknown as Record<string, unknown>)[key]; bv = (b as unknown as Record<string, unknown>)[key] }
     if (av == null && bv == null) return 0
     if (av == null) return 1
@@ -489,6 +493,7 @@ function colWidth(key: ColumnKey): string {
     avg_price_after_spp: 'w-28 flex-none text-right',
     avg_orders_per_day: 'w-24 flex-none text-right',
     current_stock: 'w-20 flex-none text-right',
+    empty_date: 'w-32 flex-none text-right',
     stock_cost_value: 'w-36 flex-none text-right',
     stock_retail_value: 'w-40 flex-none text-right',
   }
@@ -507,7 +512,15 @@ function CellValue({ col, product: p }: { col: ColumnKey; product: CatalogProduc
         ? <img src={p.photo_url} alt="" className="h-10 w-8 object-cover rounded" />
         : <div className="h-10 w-8 bg-muted rounded" />
     case 'nm_id':
-      return <span className="font-mono text-xs">{p.nm_id}</span>
+      return (
+        <a
+          href={`/catalog/${p.nm_id}`}
+          className="font-mono text-xs text-blue-400 hover:underline"
+          title="Открыть дк-матрицу"
+        >
+          {p.nm_id}
+        </a>
+      )
     case 'vendor_code': return <>{p.vendor_code ?? '—'}</>
     case 'subject_name': return <>{p.subject_name ?? '—'}</>
     case 'group':
@@ -521,6 +534,23 @@ function CellValue({ col, product: p }: { col: ColumnKey; product: CatalogProduc
     case 'avg_price_after_spp': return <>{p.avg_price_after_spp != null ? `${fmt(p.avg_price_after_spp)} ₽` : '—'}</>
     case 'avg_orders_per_day': return <>{p.avg_orders_per_day != null ? fmt(p.avg_orders_per_day, 1) : '—'}</>
     case 'current_stock': return <>{fmt(p.current_stock)}</>
+    case 'empty_date': {
+      if (p.days_of_stock === null) return <span className="text-muted-foreground text-xs">∞</span>
+      if (p.days_of_stock === 0) return <span className="font-semibold text-red-600 text-xs">Пусто</span>
+      const colorClass = p.days_of_stock < 15
+        ? 'text-red-600 font-semibold'
+        : p.days_of_stock < 30
+          ? 'text-yellow-600 font-medium'
+          : 'text-green-600'
+      const dateLabel = p.empty_date
+        ? new Date(p.empty_date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+        : '—'
+      return (
+        <span className={`text-xs ${colorClass}`} title={`${p.days_of_stock} дн.`}>
+          {dateLabel}
+        </span>
+      )
+    }
     case 'stock_cost_value': {
       const v = computedVal(p, 'stock_cost_value')
       return <>{v != null && v > 0 ? `${fmt(v)} ₽` : '—'}</>

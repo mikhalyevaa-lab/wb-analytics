@@ -4,6 +4,7 @@ import { getDailySales, getTodayStats, getMonthStats, getUserStoreIds } from '@/
 import { TodayCards } from '@/components/dashboard/today-cards'
 import { MonthCards } from '@/components/dashboard/month-cards'
 import { SalesChart } from '@/components/dashboard/sales-chart'
+import { TopProducts } from '@/components/dashboard/top-products'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,6 +59,10 @@ export default async function DashboardPage() {
       <MonthCards stats={month} />
 
       <SalesChart data={dailySales} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TopProducts />
+      </div>
     </div>
   )
 }

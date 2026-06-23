@@ -10,10 +10,11 @@ interface SettingsFormProps {
   storeId: string
   storeName: string
   wbToken: string
+  wbAnalyticsToken: string
   telegramChatId: string | null
 }
 
-export function SettingsForm({ storeId, storeName, wbToken, telegramChatId }: SettingsFormProps) {
+export function SettingsForm({ storeId, storeName, wbToken, wbAnalyticsToken, telegramChatId }: SettingsFormProps) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -22,6 +23,7 @@ export function SettingsForm({ storeId, storeName, wbToken, telegramChatId }: Se
   const [form, setForm] = useState({
     store_name: storeName,
     wb_token: wbToken,
+    wb_analytics_token: wbAnalyticsToken,
     telegram_chat_id: telegramChatId || '',
   })
 
@@ -88,6 +90,19 @@ export function SettingsForm({ storeId, storeName, wbToken, telegramChatId }: Se
             />
             <p className="text-xs text-zinc-400">
               Получить: WB → Настройки → Доступ к API → Создать токен (Statistics)
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm text-zinc-500">WB Analytics токен</label>
+            <Input
+              type="password"
+              value={form.wb_analytics_token}
+              onChange={e => setForm(f => ({ ...f, wb_analytics_token: e.target.value }))}
+              placeholder="eyJ..."
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-zinc-400">
+              Нужен для воронки продаж. WB → Настройки → Доступ к API → Аналитика
             </p>
           </div>
         </CardContent>

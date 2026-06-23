@@ -1,4 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card'
+import { Hint } from '@/components/ui/hint'
 import type { KpiData } from '@/lib/queries'
 
 function delta(cur: number, prev: number, lowerIsBetter = false): { sign: string; pct: string; up: boolean } {
@@ -27,6 +28,7 @@ function KpiCard({
   cur,
   suffix = '',
   lowerIsBetter = false,
+  hint,
 }: {
   label: string
   value: string
@@ -35,12 +37,16 @@ function KpiCard({
   cur: number
   suffix?: string
   lowerIsBetter?: boolean
+  hint?: React.ReactNode
 }) {
   const d = delta(cur, prev, lowerIsBetter)
   return (
     <Card>
       <CardContent className="p-5">
-        <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">{label}</p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">{label}</p>
+          {hint && <Hint width={280}>{hint}</Hint>}
+        </div>
         <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mt-1.5">
           {value}{suffix}
         </p>
@@ -73,6 +79,7 @@ export function KpiCards({ kpi }: { kpi: KpiData }) {
         sub="прошлый период"
         cur={kpi.orders}
         prev={kpi.ordersPrev}
+        hint={<p>Все строки из таблицы заказов WB за период — включая будущие выкупы и отмены. Не равно числу продаж.</p>}
       />
       <KpiCard
         label="Сумма заказов"
@@ -81,6 +88,7 @@ export function KpiCards({ kpi }: { kpi: KpiData }) {
         cur={kpi.revenue}
         prev={kpi.revenuePrev}
         suffix=" ₽"
+        hint={<p>Сумма цен заказанных товаров (<code className="text-xs bg-muted px-1 rounded">finished_price</code>) за период. Включает ещё не выкупленные и не отменённые заказы.</p>}
       />
       <KpiCard
         label="Реклама, руб"
@@ -90,6 +98,7 @@ export function KpiCards({ kpi }: { kpi: KpiData }) {
         prev={kpi.adSpendPrev}
         suffix=" ₽"
         lowerIsBetter
+        hint={<p>Расходы на рекламные кампании WB за период. Данные из API рекламы WB.</p>}
       />
       <KpiCard
         label="Цена заказа, руб"
@@ -99,6 +108,7 @@ export function KpiCards({ kpi }: { kpi: KpiData }) {
         prev={costPerOrderPrev}
         suffix=" ₽"
         lowerIsBetter
+        hint={<p>Рекламный бюджет ÷ количество заказов за период. Показывает во сколько обходится привлечение одного заказа через рекламу.</p>}
       />
       <KpiCard
         label="Переходов"
@@ -106,6 +116,7 @@ export function KpiCards({ kpi }: { kpi: KpiData }) {
         sub="прошлый период"
         cur={kpi.clicks}
         prev={kpi.clicksPrev}
+        hint={<p>Количество кликов по рекламным объявлениям WB за период. Данные из API статистики рекламы.</p>}
       />
     </div>
   )

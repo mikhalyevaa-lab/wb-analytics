@@ -3,6 +3,7 @@
  */
 
 import { createClient } from './supabase-server'
+import { adminDb } from './admin'
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // Supabase PostgREST cap = 1000 строк. Для агрегатов по большим таблицам нужна пагинация.
@@ -427,10 +428,23 @@ export interface PnLRow {
 }
 
 export interface PnLSummary {
+  // From wb_weekly_reports
+  sale: number            // Выручка (Продажа)
+  forPay: number          // К перечислению за товар
+  commission: number      // Комиссия WB = sale - forPay
+  logistics: number       // Стоимость логистики
+  storage: number         // Стоимость хранения
+  penalties: number       // Штрафы
+  correction: number      // Корректировка ВВ
+  otherDeductions: number // Прочие удержания
+  totalToPay: number      // Итого к оплате WB
+  // From wb_ad_spend
+  adSpend: number         // Реклама WB
+  // Counts
+  reportCount: number
+  // Legacy aliases (for compatibility)
   revenue: number
   returns: number
-  logistics: number
-  penalties: number
   additionalPayments: number
   netPayable: number
 }
@@ -454,42 +468,49 @@ export async function getManualCosts(storeIds: string[], dateFrom: string, dateT
 export async function getPnL(storeIds: string[], dateFrom: string, dateTo: string): Promise<PnLSummary> {
   const db = await createClient()
 
-  const [{ data: dirRows }, { data: finRows }] = await Promise.all([
-    db.from('directory').select('doc_type_name, multiplier'),
-    db.from('wb_finance')
-      .select('doc_type_name, ppvz_for_pay, delivery_rub, penalty, additional_payment')
+  const [{ data: weeklyRows }, { data: adRows }] = await Promise.all([
+    db.from('wb_weekly_reports')
+      .select('sale,for_pay,logistics_cost,storage_cost,total_fines,wb_commission_correction,other_deductions,total_to_pay')
       .in('store_id', storeIds)
       .gte('date_from', dateFrom)
       .lte('date_to', dateTo),
+    db.from('wb_ad_spend')
+      .select('spend')
+      .in('store_id', storeIds)
+      .gte('date', dateFrom)
+      .lte('date', dateTo),
   ])
 
-  const multiplierMap: Record<string, number> = {}
-  for (const d of dirRows ?? []) {
-    multiplierMap[d.doc_type_name] = d.multiplier
-  }
+  const sum = (rows: Record<string, number | null>[] | null, field: string) =>
+    (rows ?? []).reduce((acc, r) => acc + (r[field] ?? 0), 0)
 
-  let revenue = 0
-  let returns = 0
-  let logistics = 0
-  let penalties = 0
-  let additionalPayments = 0
-
-  for (const row of finRows ?? []) {
-    const mult = multiplierMap[row.doc_type_name] ?? 0
-    if (mult === 1) revenue += row.ppvz_for_pay ?? 0
-    if (mult === -1) returns += Math.abs(row.ppvz_for_pay ?? 0)
-    logistics += row.delivery_rub ?? 0
-    penalties += row.penalty ?? 0
-    additionalPayments += row.additional_payment ?? 0
-  }
+  const sale       = sum(weeklyRows, 'sale')
+  const forPay     = sum(weeklyRows, 'for_pay')
+  const logistics  = sum(weeklyRows, 'logistics_cost')
+  const storage    = sum(weeklyRows, 'storage_cost')
+  const penalties  = sum(weeklyRows, 'total_fines')
+  const correction = sum(weeklyRows, 'wb_commission_correction')
+  const otherDeductions = sum(weeklyRows, 'other_deductions')
+  const totalToPay = sum(weeklyRows, 'total_to_pay')
+  const adSpend    = (adRows ?? []).reduce((acc, r) => acc + (r.spend ?? 0), 0)
 
   return {
-    revenue,
-    returns,
+    sale,
+    forPay,
+    commission: sale - forPay,
     logistics,
+    storage,
     penalties,
-    additionalPayments,
-    netPayable: revenue - returns - logistics - penalties + additionalPayments,
+    correction,
+    otherDeductions,
+    totalToPay,
+    adSpend,
+    reportCount: (weeklyRows ?? []).length,
+    // Legacy aliases
+    revenue: sale,
+    returns: 0,
+    additionalPayments: 0,
+    netPayable: totalToPay,
   }
 }
 
@@ -516,6 +537,7 @@ export async function getStores(storeIds: string[]) {
 // ============================================================
 
 type AdRow = { spend: number | null; orders_sum: number | null; orders_count: number | null; clicks: number | null; views: number | null }
+type AdOrderRow = { total_price: number | null; discount_percent: number | null }
 
 export interface AdStats {
   spend: number
@@ -536,7 +558,7 @@ export interface AdPageData {
   forecast: AdStats
 }
 
-function calcAdStats(rows: AdRow[]): AdStats {
+function calcAdStats(rows: AdRow[], storeOrdersSum: number): AdStats {
   const spend       = rows.reduce((s, r) => s + (r.spend        ?? 0), 0)
   const ordersSum   = rows.reduce((s, r) => s + (r.orders_sum   ?? 0), 0)
   const ordersCount = rows.reduce((s, r) => s + (r.orders_count ?? 0), 0)
@@ -544,13 +566,50 @@ function calcAdStats(rows: AdRow[]): AdStats {
   const views       = rows.reduce((s, r) => s + (r.views        ?? 0), 0)
   return {
     spend, ordersSum, ordersCount, clicks, views,
-    ddr: ordersSum > 0 ? (spend / ordersSum) * 100 : 0,
-    ctr: views     > 0 ? (clicks / views)   * 100 : 0,
+    ddr: storeOrdersSum > 0 ? (spend / storeOrdersSum) * 100 : 0,
+    ctr: views > 0 ? (clicks / views) * 100 : 0,
   }
 }
 
+// wb_orders.date is stored as ISO timestamp — use next-day exclusive upper bound
+// and fall back to ad-attributed orders_sum when wb_orders has no data for the period
+async function fetchStoreOrdersSum(
+  db: Awaited<ReturnType<typeof createClient>>,
+  storeIds: string[],
+  dateFrom: string,
+  dateTo: string,
+  adRowsFallback: AdRow[],
+): Promise<number> {
+  const nextDay = new Date(dateTo + 'T00:00:00Z')
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1)
+  const nextDayStr = nextDay.toISOString().split('T')[0]
+
+  let total = 0, page = 0
+  while (true) {
+    const { data } = await db.from('wb_orders')
+      .select('total_price, discount_percent')
+      .in('store_id', storeIds)
+      .gte('date', dateFrom)
+      .lt('date', nextDayStr)           // lt next day covers full dateTo including timestamps
+      .range(page * 1000, (page + 1) * 1000 - 1) as { data: AdOrderRow[] | null }
+    if (!data?.length) break
+    for (const r of data) {
+      const dp = (r.discount_percent ?? 0) / 100
+      total += (r.total_price ?? 0) * (1 - dp)
+    }
+    if (data.length < 1000) break
+    page++
+  }
+
+  // If no store orders found (sync not yet run for this day), fall back to ad-attributed sum
+  if (total === 0) {
+    total = adRowsFallback.reduce((s, r) => s + (r.orders_sum ?? 0), 0)
+  }
+  return total
+}
+
 export async function getAdPageData(storeIds: string[]): Promise<AdPageData> {
-  const db = await createClient()
+  const db = adminDb()
   const moscowNow  = new Date(Date.now() + 3 * 60 * 60 * 1000)
   const year       = moscowNow.getUTCFullYear()
   const month      = moscowNow.getUTCMonth()
@@ -563,14 +622,45 @@ export async function getAdPageData(storeIds: string[]): Promise<AdPageData> {
     'июля','августа','сентября','октября','ноября','декабря']
 
   const sel = 'spend, orders_sum, orders_count, clicks, views'
-  const [todayRes, monthRes] = await Promise.all([
-    db.from('wb_ad_spend').select(sel).in('store_id', storeIds).eq('date', todayStr),
-    db.from('wb_ad_spend').select(sel).in('store_id', storeIds)
-      .gte('date', monthStart).lte('date', todayStr),
+
+  async function fetchAdRowsForDate(date: string): Promise<AdRow[]> {
+    const all: AdRow[] = []
+    for (let page = 0; ; page++) {
+      const { data } = await db.from('wb_ad_spend').select(sel)
+        .in('store_id', storeIds).eq('date', date)
+        .range(page * 1000, (page + 1) * 1000 - 1)
+      if (!data?.length) break
+      all.push(...(data as AdRow[]))
+      if (data.length < 1000) break
+    }
+    return all
+  }
+
+  async function fetchAdRowsForMonth(from: string, to: string): Promise<AdRow[]> {
+    const all: AdRow[] = []
+    for (let page = 0; ; page++) {
+      const { data } = await db.from('wb_ad_spend').select(sel)
+        .in('store_id', storeIds).gte('date', from).lte('date', to)
+        .range(page * 1000, (page + 1) * 1000 - 1)
+      if (!data?.length) break
+      all.push(...(data as AdRow[]))
+      if (data.length < 1000) break
+    }
+    return all
+  }
+
+  const [todayRows, monthRows] = await Promise.all([
+    fetchAdRowsForDate(todayStr),
+    fetchAdRowsForMonth(monthStart, todayStr),
   ])
 
-  const todayStats = calcAdStats(todayRes.data ?? [])
-  const monthStats = calcAdStats(monthRes.data ?? [])
+  const [todayOrdersSum, monthOrdersSum] = await Promise.all([
+    fetchStoreOrdersSum(db, storeIds, todayStr, todayStr, todayRows),
+    fetchStoreOrdersSum(db, storeIds, monthStart, todayStr, monthRows),
+  ])
+
+  const todayStats = calcAdStats(todayRows, todayOrdersSum)
+  const monthStats = calcAdStats(monthRows, monthOrdersSum)
 
   const scale = day > 0 ? daysInMonth / day : 1
   const forecast: AdStats = {
@@ -579,7 +669,7 @@ export async function getAdPageData(storeIds: string[]): Promise<AdPageData> {
     ordersCount:  Math.round(monthStats.ordersCount * scale),
     clicks:       Math.round(monthStats.clicks      * scale),
     views:        Math.round(monthStats.views       * scale),
-    ddr:          monthStats.ddr,
+    ddr:          monthOrdersSum > 0 ? (monthStats.spend * scale) / (monthOrdersSum * scale) * 100 : 0,
     ctr:          monthStats.ctr,
   }
 

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { getUserStoreIds, getAdPageData } from '@/lib/queries'
 import { AdCards } from '@/components/advertising/ad-cards'
+import { CampaignsTable } from '@/components/advertising/campaigns-table'
 import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +18,10 @@ export default async function AdvertisingPage() {
     <div className="space-y-8 p-6">
       <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Реклама</h1>
       <AdCards data={adData} />
+
+      <div>
+        <CampaignsTable />
+      </div>
     </div>
   )
 }

@@ -7,6 +7,7 @@ const WB_STATS_URL     = 'https://statistics-api.wildberries.ru'
 const WB_CONTENT_URL   = 'https://content-api.wildberries.ru'
 const WB_ADV_URL       = 'https://advert-api.wildberries.ru'
 const WB_ANALYTICS_URL = 'https://seller-analytics-api.wildberries.ru'
+const WB_COMMON_URL    = 'https://common-api.wildberries.ru'
 
 // ---------- Типы данных ----------
 
@@ -205,6 +206,23 @@ export interface WBAdSpend {
   advertStatus: number
 }
 
+export interface WBAdStatNm {
+  nmId: number
+  name?: string
+  views: number
+  clicks: number
+  orders: number
+  sum: number
+  sum_price: number
+  atbs?: number
+  canceled?: number
+}
+
+export interface WBAdStatApp {
+  appType: number
+  nms: WBAdStatNm[]
+}
+
 // /adv/v3/fullstats response
 export interface WBAdStatDay {
   date: string
@@ -216,6 +234,7 @@ export interface WBAdStatDay {
   sum_price: number // orders sum
   shks: number
   atbs: number
+  apps?: WBAdStatApp[]
 }
 
 export interface WBAdStatCampaign {
@@ -229,6 +248,105 @@ export interface WBAdStatCampaign {
   shks: number
   atbs: number
   days: WBAdStatDay[]
+}
+
+// ---------- Тарифы и комиссии ----------
+
+export interface WBCommission {
+  subjectID: number
+  subjectName: string
+  parentID: number
+  parentName: string
+  kgvpMarketplace: number   // % комиссии для маркетплейс-схемы
+  kgvpSupplier: number      // % комиссии для FBO (поставщик)
+  kgvpSupplierExpress: number
+  kgvpBooking: number       // % за бронирование
+  kgvpPickup: number        // % самовывоз
+  paidStorageKgvp: number   // % платного хранения
+}
+
+// Тарифы из API приходят строками с запятой в качестве разделителя ("0,07")
+// Используем parseWBNum() для конвертации
+export interface WBBoxTariff {
+  warehouseName: string
+  geoName: string
+  boxDeliveryBase: string    // ₽ за первый литр (строка!)
+  boxDeliveryLiter: string   // ₽ за каждый доп. литр (строка!)
+  boxStorageBase: string     // ₽/литр/день хранение базовый (строка!)
+  boxStorageLiter: string    // ₽/литр/день хранение доп. литр (строка!)
+  boxDeliveryCoefExpr: string
+  boxStorageCoefExpr: string
+}
+
+export interface WBBoxTariffsResponse {
+  response: {
+    data: {
+      warehouseList: WBBoxTariff[]
+      dtNextBox: string
+      dtTillMax: string
+    }
+  }
+}
+
+export interface WBReturnTariff {
+  warehouseName: string
+  deliveryDumpSupOfficeBase: string   // Базовая стоимость возврата поставщику (₽)
+  deliveryDumpSupOfficeLiter: string  // Доп. литр возврата поставщику (₽)
+  deliveryDumpKgtOfficeBase: string   // Крупногабаритный возврат
+  deliveryDumpKgtOfficeLiter: string
+  deliveryDumpSupCourierBase: string
+  deliveryDumpSupCourierLiter: string
+  deliveryDumpSupReturnExpr: string
+  deliveryDumpKgtReturnExpr: string
+  deliveryDumpSrgOfficeExpr: string
+  deliveryDumpSrgReturnExpr: string
+}
+
+export interface WBReturnTariffsResponse {
+  response: {
+    data: {
+      warehouseList: WBReturnTariff[]
+      dtNextDeliveryDumpKgt: string
+      dtNextDeliveryDumpSrg: string
+      dtNextDeliveryDumpSup: string
+      dtTillMax: string
+    }
+  }
+}
+
+export interface WBPaidStorageRow {
+  date: string
+  logWarehouseCoef: number
+  officeId: number
+  warehouse: string
+  warehouseCoef: number
+  giId: number
+  chrtId: number
+  size: string
+  barcode: string
+  subject: string
+  brand: string
+  vendorCode: string
+  nmId: number
+  volume: number
+  calcType: string
+  warehousePrice: number
+  barcodesCount: number
+  palletPlaceCode: number
+  palletCount: number
+  originalDate: string
+  loyaltyDiscount: number
+  tariffFixDate: string
+  tariffLowerDate: string
+}
+
+/** Парсит числа из WB API — "1 046" → 1046, "0,07" → 0.07, "-" → null */
+export function parseWBNum(s: string | number | null | undefined): number | null {
+  if (s == null || s === '-' || s === '') return null
+  if (typeof s === 'number') return s
+  const cleaned = s.replace(/\s/g, '').replace(',', '.')
+  const n = parseFloat(cleaned)
+  return isNaN(n) ? null : n
 }
 
 // ---------- Воронка продаж ----------
@@ -379,8 +497,29 @@ class WBApiClient {
    */
   async getAdCampaigns(): Promise<WBAdCampaign[]> {
     const url = `${WB_ADV_URL}/adv/v1/promotion/count`
-    const data = await this.fetch<{ adverts?: Array<{ advertList: WBAdCampaign[]; status: number; type: number }> }>(url)
-    return (data.adverts ?? []).flatMap(g => g.advertList ?? [])
+    // API returns advert_list (snake_case) since ~2025; name field removed from this endpoint
+    const data = await this.fetch<{
+      adverts?: Array<{
+        advert_list?: Partial<WBAdCampaign>[]
+        advertList?:  Partial<WBAdCampaign>[]
+        status: number
+        type: number
+      }>
+    }>(url)
+    return (data.adverts ?? []).flatMap(g => {
+      const list = g.advert_list ?? g.advertList ?? []
+      return list.map(item => ({
+        advertId:    item.advertId ?? 0,
+        name:        item.name ?? '',   // empty string when API doesn't return names
+        type:        item.type ?? g.type,
+        status:      item.status ?? g.status,
+        dailyBudget: item.dailyBudget ?? 0,
+        createTime:  item.createTime ?? '',
+        changeTime:  item.changeTime ?? '',
+        startTime:   item.startTime ?? '',
+        endTime:     item.endTime ?? '',
+      }))
+    })
   }
 
   /**
@@ -429,6 +568,101 @@ class WBApiClient {
       }),
     })
     return Array.isArray(data) ? data : (data?.data ?? [])
+  }
+
+  /**
+   * Платное хранение: детализация по SKU и дням. Task-based через GET:
+   *   1. GET /api/v1/paid_storage?dateFrom=...&dateTo=... → { taskId }
+   *   2. GET /api/v1/paid_storage/tasks/{taskId}/download → данные (поллинг до готовности)
+   * Макс. окно: 31 день. Требует wb_analytics_token.
+   */
+  async getPaidStorage(dateFrom: string, dateTo: string): Promise<WBPaidStorageRow[]> {
+    // 1. Создаём задачу — ответ: { data: { taskId: "..." } }
+    const taskRes = await this.fetch<{ data?: { taskId?: string }; taskId?: string }>(
+      `${WB_ANALYTICS_URL}/api/v1/paid_storage?dateFrom=${dateFrom}&dateTo=${dateTo}`
+    )
+    const taskId = taskRes?.data?.taskId ?? taskRes?.taskId
+    if (!taskId) {
+      console.warn('[wb-api] paid_storage: taskId не получен', taskRes)
+      return []
+    }
+
+    // 2. Поллинг до готовности (до 12 попыток × 10 сек = 2 мин)
+    const downloadUrl = `${WB_ANALYTICS_URL}/api/v1/paid_storage/tasks/${taskId}/download`
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await sleep(10000)
+      let result: unknown
+      try {
+        result = await this.fetch<unknown>(downloadUrl)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // 400/404/202 = ещё не готово
+        if (msg.includes('400') || msg.includes('404') || msg.includes('202') || msg.includes('425')) {
+          console.log(`[wb-api] paid_storage ${taskId}: ждём (попытка ${attempt + 1}/12)`)
+          continue
+        }
+        throw e
+      }
+      if (Array.isArray(result)) return result as WBPaidStorageRow[]
+      const r = result as Record<string, unknown>
+      if (Array.isArray(r?.data)) return r.data as WBPaidStorageRow[]
+      // Если вернули taskId снова — всё ещё не готово
+      if (r?.taskId) {
+        console.log(`[wb-api] paid_storage ${taskId}: ещё готовится (попытка ${attempt + 1}/12)`)
+        continue
+      }
+      // Неожиданный формат — возвращаем пустой массив
+      console.warn('[wb-api] paid_storage: неожиданный формат ответа', result)
+      return []
+    }
+
+    console.warn(`[wb-api] paid_storage ${taskId}: таймаут 2 мин`)
+    return []
+  }
+
+  /**
+   * Комиссии WB по предметам (subjectId → %)
+   * GET /api/v1/tariffs/commission
+   * Лимит: 1 req/min
+   */
+  async getCommissions(): Promise<WBCommission[]> {
+    const url = `${WB_COMMON_URL}/api/v1/tariffs/commission`
+    const data = await this.fetch<{ report: WBCommission[] }>(url)
+    return data?.report ?? []
+  }
+
+  /**
+   * Тарифы логистики FBW (коробки) по складам
+   * GET /api/v1/tariffs/box?date=YYYY-MM-DD
+   * Содержит: boxDeliveryBase, boxDeliveryLiter, boxStorageBase, boxStorageLiter
+   * Лимит: 1 req/min
+   */
+  async getBoxTariffs(date?: string): Promise<WBBoxTariffsResponse> {
+    const d = date ?? new Date().toISOString().split('T')[0]
+    const url = `${WB_COMMON_URL}/api/v1/tariffs/box?date=${d}`
+    return this.fetch<WBBoxTariffsResponse>(url)
+  }
+
+  /**
+   * Тарифы возврата и повторной доставки по складам
+   * GET /api/v1/tariffs/return?date=YYYY-MM-DD
+   * Лимит: 1 req/min
+   */
+  async getReturnTariffs(date?: string): Promise<WBReturnTariffsResponse> {
+    const d = date ?? new Date().toISOString().split('T')[0]
+    const url = `${WB_COMMON_URL}/api/v1/tariffs/return?date=${d}`
+    return this.fetch<WBReturnTariffsResponse>(url)
+  }
+
+  /**
+   * Тарифы паллетной логистики
+   * GET /api/v1/tariffs/pallet?date=YYYY-MM-DD
+   * Лимит: 1 req/min
+   */
+  async getPalletTariffs(date?: string): Promise<{ response: { data: { warehouseList: WBBoxTariff[] } } }> {
+    const d = date ?? new Date().toISOString().split('T')[0]
+    const url = `${WB_COMMON_URL}/api/v1/tariffs/pallet?date=${d}`
+    return this.fetch(url)
   }
 
   /**

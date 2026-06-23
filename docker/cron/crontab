@@ -1,0 +1,11 @@
+# WB Analytics — расписание синхронизации
+# Переменная APP_URL и CRON_SECRET передаётся через env_file
+
+# Основной синк (заказы, продажи, финансы, остатки, товары) — каждые 2 часа
+0 */2 * * * curl -sf -X GET "$APP_URL/api/sync" -H "Authorization: Bearer $CRON_SECRET" >> /var/log/cron.log 2>&1
+
+# Тарифы — каждые 24 часа в 03:00 МСК (00:00 UTC)
+0 0 * * * curl -sf -X POST "$APP_URL/api/sync/tariffs" -H "Authorization: Bearer $CRON_SECRET" >> /var/log/cron.log 2>&1
+
+# Комиссии — каждые 10 дней в 04:00 МСК (01:00 UTC)
+0 1 */10 * * curl -sf -X POST "$APP_URL/api/sync/commissions" -H "Authorization: Bearer $CRON_SECRET" >> /var/log/cron.log 2>&1

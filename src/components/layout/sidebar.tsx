@@ -5,13 +5,24 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
 const nav = [
+  { href: '/overview', label: 'Обзор', icon: '◎' },
   { href: '/dashboard', label: 'Дашборд', icon: '▦' },
   { href: '/pnl', label: 'P&L', icon: '₽' },
   { href: '/costs', label: 'Затраты', icon: '−' },
   { href: '/cashflow', label: 'Cash Flow', icon: '⟳' },
   { href: '/catalog', label: 'Справочник по товарам', icon: '☰' },
+  { href: '/abc', label: 'ABC-анализ', icon: '◉' },
+  { href: '/logistics', label: 'Логистика', icon: '⊡' },
+  { href: '/reports', label: 'Отчёты WB', icon: '📊' },
+  { href: '/funnel', label: 'Воронка', icon: '◁' },
+  { href: '/tasks', label: 'Задачи', icon: '✓' },
   { href: '/advertising', label: 'Реклама', icon: '◈' },
+  { href: '/rnp', label: 'РНП-Сводная', icon: '⊞' },
+  { href: '/supplies', label: 'Поставки', icon: '🚚' },
   { href: '/sales-plan', label: 'План продаж', icon: '◎' },
+  { href: '/storage', label: 'Хранение WB', icon: '🏭' },
+  { href: '/quality', label: 'Качество данных', icon: '◑' },
+  { href: '/import', label: 'Импорт данных', icon: '↑' },
   { href: '/settings', label: 'Настройки', icon: '⚙' },
 ]
 

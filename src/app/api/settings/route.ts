@@ -16,7 +16,7 @@ export async function PATCH(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { store_id, store_name, wb_token, telegram_chat_id } = body
+  const { store_id, store_name, wb_token, wb_analytics_token, telegram_chat_id } = body
 
   if (!store_id) return NextResponse.json({ error: 'Missing store_id' }, { status: 400 })
 
@@ -31,10 +31,11 @@ export async function PATCH(req: NextRequest) {
 
   const admin = adminClient()
 
-  if (store_name !== undefined || wb_token !== undefined) {
+  if (store_name !== undefined || wb_token !== undefined || wb_analytics_token !== undefined) {
     const updates: Record<string, unknown> = {}
     if (store_name !== undefined) updates.name = store_name
     if (wb_token !== undefined) updates.wb_token = wb_token
+    if (wb_analytics_token !== undefined) updates.wb_analytics_token = wb_analytics_token || null
 
     const { error } = await admin.from('stores').update(updates).eq('id', store_id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

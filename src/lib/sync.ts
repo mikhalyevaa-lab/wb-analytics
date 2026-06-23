@@ -9,7 +9,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { createWBClient, formatDateForWB, daysAgo } from './wb-api'
+import { createWBClient, formatDateForWB, daysAgo, parseWBNum } from './wb-api'
 import { recalcProductAggregates } from './sync-initial'
 import type { WBFunnelItem } from './wb-api'
 
@@ -31,6 +31,59 @@ type Store = {
   wb_analytics_token: string | null
 }
 
+// ---------- Throttle: пропустить синк если он запускался недавно ----------
+
+// Throttle: проверяем когда последний раз успешно завершился синк этого типа
+async function shouldSync(
+  storeId: string,
+  method: string,
+  minIntervalHours: number,
+  db: SupabaseAdminClient
+): Promise<boolean> {
+  const { data } = await db
+    .from('sync_log')
+    .select('finished_at')
+    .eq('store_id', storeId)
+    .eq('method', method)
+    .is('error', null)
+    .not('finished_at', 'is', null)
+    .order('finished_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (!data?.finished_at) return true
+  const hoursSince = (Date.now() - new Date(data.finished_at).getTime()) / 3_600_000
+  return hoursSince >= minIntervalHours
+}
+
+// Логируем запуск/завершение синка в sync_log (существующая схема: method, created_at, finished_at, rows_count, error)
+async function logSync(
+  storeId: string,
+  method: string,
+  db: SupabaseAdminClient,
+  fn: () => Promise<{ count: number; error?: string }>
+): Promise<{ count: number; error?: string }> {
+  const startMs = Date.now()
+  const { data: logRow } = await db
+    .from('sync_log')
+    .insert({ store_id: storeId, method, status: 'running' })
+    .select('id')
+    .single()
+
+  const result = await fn()
+
+  if (logRow?.id) {
+    await db.from('sync_log').update({
+      finished_at:  new Date().toISOString(),
+      rows_count:   result.count,
+      status:       result.error ? 'error' : 'ok',
+      error:        result.error ?? null,
+      duration_ms:  Date.now() - startMs,
+    }).eq('id', logRow.id)
+  }
+  return result
+}
+
 // ---------- Главная функция ----------
 
 export async function syncStore(store: Store): Promise<{
@@ -42,21 +95,61 @@ export async function syncStore(store: Store): Promise<{
   const wb = createWBClient(store.wb_token)
   const results: Record<string, { count: number; error?: string }> = {}
 
+  // Заказы, продажи, финансы, поставки — каждый запуск (каждые 2 часа)
   await syncOrders(store, wb, db, results)
   await sleep(1000)
   await syncSales(store, wb, db, results)
-  await sleep(1000)
-  await syncStocks(store, wb, db, results)
   await sleep(1000)
   await syncFinance(store, wb, db, results)
   await sleep(1000)
   await syncIncomes(store, wb, db, results)
   await sleep(1000)
-  await syncProducts(store, wb, db, results)
+
+  // Остатки и товары — раз в 12 часов
+  if (await shouldSync(store.id, 'stocks', 12, db)) {
+    await syncStocks(store, wb, db, results)
+    await sleep(1000)
+  } else {
+    console.log(`[sync] stocks: throttled`)
+  }
+
+  if (await shouldSync(store.id, 'products', 12, db)) {
+    await syncProducts(store, wb, db, results)
+    await sleep(1000)
+  } else {
+    console.log(`[sync] products: throttled`)
+  }
+
+  // Платное хранение — раз в 20 часов
+  if (await shouldSync(store.id, 'storage', 20, db)) {
+    await logSync(store.id, 'storage', db, async () => {
+      await syncPaidStorageInternal(store, db, results)
+      return results.storage ?? { count: 0 }
+    })
+  } else {
+    console.log(`[sync] storage: throttled`)
+  }
   await sleep(1000)
+
   await syncAdvert(store, wb, db, results)
   await sleep(1000)
   await syncFunnel(store, db, results)
+
+  // Комиссии — раз в 240 часов (10 дней)
+  if (await shouldSync(store.id, 'commissions', 240, db)) {
+    await sleep(61000)
+    await syncCommissions(store, wb, db, results)
+  } else {
+    console.log(`[sync] commissions: throttled`)
+  }
+
+  // Тарифы — раз в 24 часа
+  if (await shouldSync(store.id, 'tariffs', 24, db)) {
+    await sleep(61000)
+    await syncTariffs(store, wb, db, results)
+  } else {
+    console.log(`[sync] tariffs: throttled`)
+  }
   await sleep(500)
 
   // Пересчёт агрегатов в таблице products (buyout_rate, avg_price, avg_orders_per_day, current_stock)
@@ -106,13 +199,22 @@ async function syncOrders(
       cancel_dt: o.cancel_dt || null,
     }))
 
-    const chunks = chunkArray(rows, 500)
+    // Дедупликация по ключу — WB иногда отдаёт дубли в одной выгрузке
+    const seen = new Set<string>()
+    const deduped = rows.filter(r => {
+      const key = `${r.g_number}|${r.nm_id}|${r.barcode}|${String(r.date).slice(0, 10)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+    const chunks = chunkArray(deduped, 500)
     let total = 0
     for (const chunk of chunks) {
       const { error, count } = await db
         .from('wb_orders')
         .upsert(chunk, { onConflict: 'store_id,g_number,nm_id,barcode,date' })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
     results.orders = { count: total }
@@ -164,7 +266,7 @@ async function syncSales(
       const { error, count } = await db
         .from('wb_sales')
         .upsert(chunk, { onConflict: 'sale_id', ignoreDuplicates: true })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
     results.sales = { count: total }
@@ -215,7 +317,7 @@ async function syncStocks(
     let total = 0
     for (const chunk of chunks) {
       const { error, count } = await db.from('wb_stocks').insert(chunk)
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
     results.stocks = { count: total }
@@ -271,7 +373,7 @@ async function syncFinance(
       const { error, count } = await db
         .from('wb_finance')
         .upsert(chunk, { onConflict: 'store_id,rrd_id', ignoreDuplicates: true })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
     results.finance = { count: total }
@@ -317,7 +419,7 @@ async function syncIncomes(
       const { error, count } = await db
         .from('wb_incomes')
         .upsert(chunk, { onConflict: 'store_id,income_id', ignoreDuplicates: true })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
     results.incomes = { count: total }
@@ -359,6 +461,9 @@ async function syncProducts(
           subject_name: p.subjectName,
           photo_url: p.photos?.[0]?.c246x328 ?? null,
           color: colorChar?.value?.[0] ?? null,
+          length_mm: p.dimensions?.length ?? null,
+          width_mm: p.dimensions?.width ?? null,
+          height_mm: p.dimensions?.height ?? null,
           updated_at: p.updatedAt,
         }
       })
@@ -366,7 +471,7 @@ async function syncProducts(
       const { error, count } = await db
         .from('products')
         .upsert(rows, { onConflict: 'store_id,nm_id' })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || rows.length
 
       if (res.cursor.total < 100) break
@@ -415,24 +520,66 @@ async function syncAdvert(
         continue
       }
 
-      const campaignNames = Object.fromEntries(campaigns.map(c => [c.advertId, c.name]))
+      // API no longer returns campaign names — preserve existing names in DB
+      const campaignNames = Object.fromEntries(campaigns.map(c => [c.advertId, c.name]).filter(([, n]) => n))
+      const nmRows: Record<string, unknown>[] = []
+
       for (const camp of stats ?? []) {
         for (const day of camp.days ?? []) {
           const date = day.date?.split('T')[0]
           if (!date) continue
-          const { error } = await db.from('wb_ad_spend').upsert({
-            store_id:      store.id,
-            campaign_id:   camp.advertId,
-            campaign_name: campaignNames[camp.advertId] ?? String(camp.advertId),
+          const row: Record<string, unknown> = {
+            store_id:    store.id,
+            campaign_id: camp.advertId,
             date,
             views:        day.views     ?? 0,
             clicks:       day.clicks    ?? 0,
             spend:        day.sum       ?? 0,
             orders_count: day.orders    ?? 0,
             orders_sum:   day.sum_price ?? 0,
-          }, { onConflict: 'store_id,campaign_id,date' })
+          }
+          // Only set campaign_name if we have a real name (not empty) — don't overwrite manual names
+          const name = campaignNames[camp.advertId]
+          if (name) row.campaign_name = name
+          const { error } = await db.from('wb_ad_spend').upsert(row, {
+            onConflict: 'store_id,campaign_id,date',
+            ignoreDuplicates: false,
+          })
           if (error) console.error('[sync] advert upsert:', error.message)
           else total++
+
+          // Извлекаем nm-детализацию из того же ответа (apps → nms)
+          const nmAgg = new Map<number, { nm_name: string | null; spend: number; views: number; clicks: number; orders_count: number; orders_sum: number }>()
+          for (const app of day.apps ?? []) {
+            for (const nm of app.nms ?? []) {
+              if (!nm.nmId) continue
+              const cur = nmAgg.get(nm.nmId) ?? { nm_name: nm.name ?? null, spend: 0, views: 0, clicks: 0, orders_count: 0, orders_sum: 0 }
+              cur.spend        += nm.sum       ?? 0
+              cur.views        += nm.views     ?? 0
+              cur.clicks       += nm.clicks    ?? 0
+              cur.orders_count += nm.orders    ?? 0
+              cur.orders_sum   += nm.sum_price ?? 0
+              nmAgg.set(nm.nmId, cur)
+            }
+          }
+          for (const [nmId, agg] of nmAgg) {
+            nmRows.push({
+              store_id: store.id, campaign_id: camp.advertId, nm_id: nmId,
+              nm_name: agg.nm_name, date,
+              spend: agg.spend, views: agg.views, clicks: agg.clicks,
+              orders_count: agg.orders_count, orders_sum: agg.orders_sum,
+            })
+          }
+        }
+      }
+
+      // Batch upsert nm rows
+      if (nmRows.length) {
+        for (let j = 0; j < nmRows.length; j += 500) {
+          const { error } = await db.from('wb_ad_spend_nm').upsert(nmRows.slice(j, j + 500), {
+            onConflict: 'store_id,campaign_id,nm_id,date', ignoreDuplicates: false,
+          })
+          if (error) console.error('[sync] advert nm upsert:', error.message)
         }
       }
     }
@@ -443,6 +590,143 @@ async function syncAdvert(
     console.error('[sync] advert error:', msg)
     results.advert = { count: 0, error: msg }
   }
+}
+
+// ---------- Комиссии WB по предметам ----------
+
+async function syncCommissions(
+  store: Store,
+  wb: ReturnType<typeof createWBClient>,
+  db: SupabaseAdminClient,
+  results: Record<string, { count: number; error?: string }>
+) {
+  results.commissions = await logSync(store.id, 'commissions', db, async () => {
+    const commissions = await wb.getCommissions()
+    if (!commissions.length) return { count: 0 }
+
+    const rows = commissions.map(c => ({
+      store_id:          store.id,
+      subject_id:        c.subjectID,
+      subject_name:      c.subjectName,
+      parent_id:         c.parentID,
+      parent_name:       c.parentName,
+      kgvp_supplier:     c.kgvpSupplier,
+      kgvp_marketplace:  c.kgvpMarketplace,
+      kgvp_pickup:       c.kgvpPickup,
+      kgvp_booking:      c.kgvpBooking,
+      paid_storage_kgvp: c.paidStorageKgvp,
+      loaded_at:         new Date().toISOString(),
+    }))
+
+    let total = 0
+    for (const chunk of chunkArray(rows, 500)) {
+      const { error, count } = await db
+        .from('wb_commissions')
+        .upsert(chunk, { onConflict: 'store_id,subject_id' })
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
+      total += count || chunk.length
+    }
+    return { count: total }
+  }).catch(err => {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[sync] commissions error:', msg)
+    return { count: 0, error: msg }
+  })
+}
+
+// ---------- Тарифы логистики, хранения, возврата ----------
+
+async function syncTariffs(
+  store: Store,
+  wb: ReturnType<typeof createWBClient>,
+  db: SupabaseAdminClient,
+  results: Record<string, { count: number; error?: string }>
+) {
+  results.tariffs = await logSync(store.id, 'tariffs', db, async () => {
+    const today = new Date().toISOString().split('T')[0]
+    let total = 0
+
+    // Box (доставка + хранение)
+    const boxResp = await wb.getBoxTariffs(today)
+    const boxList = boxResp?.response?.data?.warehouseList ?? []
+    const dtNextBox    = boxResp?.response?.data?.dtNextBox ?? null
+    const dtTillMaxBox = boxResp?.response?.data?.dtTillMax ?? null
+
+    if (boxList.length) {
+      const baseRow = (t: typeof boxList[0]) => ({
+        store_id:           store.id,
+        tariff_type:        'box',
+        warehouse_name:     t.warehouseName,
+        geo_name:           t.geoName ?? null,
+        delivery_base:      parseWBNum(t.boxDeliveryBase),
+        delivery_liter:     parseWBNum(t.boxDeliveryLiter),
+        delivery_coef_expr: parseWBNum(t.boxDeliveryCoefExpr),
+        storage_base:       parseWBNum(t.boxStorageBase),
+        storage_liter:      parseWBNum(t.boxStorageLiter),
+        storage_coef_expr:  parseWBNum(t.boxStorageCoefExpr),
+        dt_next_change:     dtNextBox ? dtNextBox.split('T')[0] : null,
+        dt_till_max:        dtTillMaxBox ? dtTillMaxBox.split('T')[0] : null,
+        loaded_at:          new Date().toISOString(),
+      })
+
+      // Актуальный snapshot
+      for (const chunk of chunkArray(boxList.map(baseRow), 200)) {
+        const { error, count } = await db
+          .from('wb_tariffs')
+          .upsert(chunk, { onConflict: 'store_id,tariff_type,warehouse_name' })
+        if (error) throw new Error(error.message ?? JSON.stringify(error))
+        total += count || chunk.length
+      }
+
+      // История
+      const histRows = boxList.map(t => ({ ...baseRow(t), snapshot_date: today }))
+      for (const chunk of chunkArray(histRows, 200)) {
+        await db.from('wb_tariffs_history')
+          .upsert(chunk, { onConflict: 'store_id,tariff_type,warehouse_name,snapshot_date' })
+      }
+    }
+
+    await sleep(61000) // 1 req/min лимит
+
+    // Return (возврат)
+    const retResp = await wb.getReturnTariffs(today)
+    const retList = retResp?.response?.data?.warehouseList ?? []
+    const dtTillMaxRet = retResp?.response?.data?.dtTillMax ?? null
+
+    if (retList.length) {
+      const baseRow = (t: typeof retList[0]) => ({
+        store_id:             store.id,
+        tariff_type:          'return',
+        warehouse_name:       t.warehouseName,
+        return_office_base:   parseWBNum(t.deliveryDumpSupOfficeBase),
+        return_office_liter:  parseWBNum(t.deliveryDumpSupOfficeLiter),
+        return_courier_base:  parseWBNum(t.deliveryDumpSupCourierBase),
+        return_courier_liter: parseWBNum(t.deliveryDumpSupCourierLiter),
+        dt_till_max:          dtTillMaxRet ? dtTillMaxRet.split('T')[0] : null,
+        loaded_at:            new Date().toISOString(),
+      })
+
+      for (const chunk of chunkArray(retList.map(baseRow), 200)) {
+        const { error, count } = await db
+          .from('wb_tariffs')
+          .upsert(chunk, { onConflict: 'store_id,tariff_type,warehouse_name' })
+        if (error) throw new Error(error.message ?? JSON.stringify(error))
+        total += count || chunk.length
+      }
+
+      const histRows = retList.map(t => ({ ...baseRow(t), snapshot_date: today }))
+      for (const chunk of chunkArray(histRows, 200)) {
+        await db.from('wb_tariffs_history')
+          .upsert(chunk, { onConflict: 'store_id,tariff_type,warehouse_name,snapshot_date' })
+      }
+    }
+
+    return { count: total }
+  }).catch(err => {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[sync] tariffs error:', msg)
+    return { count: 0, error: msg }
+  })
 }
 
 // ---------- Начальная загрузка заказов ----------
@@ -506,9 +790,9 @@ export async function syncOrdersPeriod(
 
 const FUNNEL_BATCH = 20 // лимит API — 20 nm_id за запрос
 
-/** Возвращает все nm_id для магазина из таблицы wb_products */
+/** Возвращает все nm_id для магазина из таблицы products */
 async function getStoreNmIds(storeId: string, db: SupabaseAdminClient): Promise<number[]> {
-  const { data } = await db.from('wb_products').select('nm_id').eq('store_id', storeId)
+  const { data } = await db.from('products').select('nm_id').eq('store_id', storeId)
   return (data ?? []).map(r => r.nm_id as number).filter(Boolean)
 }
 
@@ -534,7 +818,6 @@ async function upsertFunnelRows(
       add_to_cart_conversion:  day.addToCartConversion ?? 0,
       cart_to_order_conversion:day.cartToOrderConversion ?? 0,
       add_to_wishlist_count:   day.addToWishlistCount ?? 0,
-      updated_at:              new Date().toISOString(),
     }))
   )
   if (!rows.length) return 0
@@ -696,6 +979,142 @@ export async function recalcAllStoresAggregates(): Promise<void> {
       console.error(`[nightly] ошибка агрегатов ${store.name}:`, err)
     }
   }
+}
+
+// ---------- Платное хранение ----------
+
+/**
+ * Ежедневный синк платного хранения (последние 3 дня — WB поздно финализирует данные).
+ * Требует wb_analytics_token.
+ */
+async function syncPaidStorageInternal(
+  store: Store,
+  db: SupabaseAdminClient,
+  results: Record<string, { count: number; error?: string }>
+) {
+  if (!store.wb_analytics_token) {
+    results.storage = { count: 0, error: 'no analytics token' }
+    return
+  }
+  try {
+    const today  = new Date().toISOString().split('T')[0]
+    const from3  = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+    const wb = createWBClient(store.wb_analytics_token)
+    const rows = await wb.getPaidStorage(from3, today)
+    if (!rows?.length) { results.storage = { count: 0 }; return }
+
+    const dbRows = rows.map(r => ({
+      store_id:    store.id,
+      date:        r.date?.split('T')[0] ?? r.originalDate?.split('T')[0] ?? today,
+      nm_id:       r.nmId,
+      vendor_code: r.vendorCode ?? null,
+      barcode:     r.barcode ?? null,
+      subject:     r.subject ?? null,
+      brand:       r.brand ?? null,
+      warehouse:   r.warehouse ?? null,
+      volume:      r.volume ?? null,
+      cost:           r.warehousePrice != null ? r.warehousePrice * (1 - (r.loyaltyDiscount ?? 0) / 100) : null,
+      barcodes_count: r.barcodesCount ?? null,
+      calc_type:      r.calcType ?? null,
+    }))
+
+    let total = 0
+    for (const chunk of chunkArray(dbRows, 500)) {
+      const { error, count } = await (db.from('wb_storage_daily') as any)
+        .upsert(chunk, { onConflict: 'store_id,date,nm_id,warehouse,barcode' })
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
+      total += count || chunk.length
+    }
+    results.storage = { count: total }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[sync] storage error:', msg)
+    results.storage = { count: 0, error: msg }
+  }
+}
+
+/**
+ * Экспортируемая функция для загрузки платного хранения за произвольный период.
+ * Окно: 31 день за запрос. Используется для исторической загрузки.
+ */
+export async function syncPaidStoragePeriod(
+  storeId: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<{ inserted: number; chunks: number }> {
+  const db = createAdminClient()
+  const { data: storeRow } = await db
+    .from('stores')
+    .select('wb_analytics_token')
+    .eq('id', storeId)
+    .single()
+  if (!storeRow?.wb_analytics_token) throw new Error('no wb_analytics_token')
+
+  const wb = createWBClient(storeRow.wb_analytics_token)
+
+  // Разбиваем период на 31-дневные чанки
+  const periodChunks: Array<{ from: string; to: string }> = []
+  let cur = new Date(dateFrom + 'T00:00:00Z')
+  const end = new Date(dateTo + 'T00:00:00Z')
+  while (cur <= end) {
+    // WB paid_storage API: max 8 days per request (≤7 days diff)
+    const chunkEnd = new Date(Math.min(cur.getTime() + 7 * 86400000, end.getTime()))
+    periodChunks.push({
+      from: cur.toISOString().split('T')[0],
+      to:   chunkEnd.toISOString().split('T')[0],
+    })
+    cur = new Date(chunkEnd.getTime() + 86400000)
+  }
+
+  let inserted = 0
+  for (const chunk of periodChunks) {
+    let rows
+    try {
+      rows = await wb.getPaidStorage(chunk.from, chunk.to)
+    } catch (e) {
+      console.error(`[storage-period] ${chunk.from}–${chunk.to}:`, e)
+      await sleep(5000)
+      continue
+    }
+
+    if (!rows?.length) continue
+
+    const allRows = rows.map(r => ({
+      store_id:    storeId,
+      date:        r.date?.split('T')[0] ?? r.originalDate?.split('T')[0] ?? chunk.from,
+      nm_id:       r.nmId,
+      vendor_code: r.vendorCode ?? null,
+      barcode:     r.barcode ?? null,
+      subject:     r.subject ?? null,
+      brand:       r.brand ?? null,
+      warehouse:   r.warehouse ?? null,
+      volume:      r.volume ?? null,
+      barcodes_count: r.barcodesCount ?? null,
+      cost_per_unit:  r.warehousePrice ?? null,
+      cost:           r.warehousePrice != null ? r.warehousePrice * (1 - (r.loyaltyDiscount ?? 0) / 100) : null,
+      calc_type:      r.calcType ?? null,
+    }))
+
+    // WB может вернуть дубли в одном ответе — дедупликация по уникальному ключу
+    const seen = new Set<string>()
+    const dbRows = allRows.filter(r => {
+      const key = `${r.date}|${r.nm_id}|${r.warehouse ?? ''}|${r.barcode ?? ''}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+    for (const batch of chunkArray(dbRows, 500)) {
+      const { error } = await (db.from('wb_storage_daily') as any)
+        .upsert(batch, { onConflict: 'store_id,date,nm_id,warehouse,barcode' })
+      if (error) console.error('[storage-period] upsert:', error.message)
+      else inserted += batch.length
+    }
+    console.log(`[storage-period] ${chunk.from}–${chunk.to}: ${rows.length} строк`)
+    await sleep(1000)
+  }
+
+  return { inserted, chunks: periodChunks.length }
 }
 
 // ---------- Хелперы ----------

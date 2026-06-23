@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { syncAllStores } from '@/lib/sync'
 
+export const maxDuration = 300
+
 // Защита от несанкционированных вызовов
 const CRON_SECRET = process.env.CRON_SECRET
 
