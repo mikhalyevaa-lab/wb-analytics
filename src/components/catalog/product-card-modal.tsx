@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupBadge } from './group-badge'
 import { type CatalogProduct, type ProductGroup } from './catalog-table'
+import { useRole } from '@/contexts/role-context'
 
 interface Props {
   product: CatalogProduct
@@ -20,6 +21,7 @@ function fmt(n: number | null, decimals = 0, suffix = '') {
 }
 
 export function ProductCardModal({ product, groups, onClose, onUpdate }: Props) {
+  const { can } = useRole()
   const [costPrice, setCostPrice] = useState(product.cost_price?.toString() ?? '')
   const [groupId, setGroupId] = useState(product.group_id ?? '__none__')
   const [saving, setSaving] = useState(false)
@@ -138,16 +140,18 @@ export function ProductCardModal({ product, groups, onClose, onUpdate }: Props) 
         ) : null}
 
         <div className="space-y-3 border-t pt-3">
-          <div>
-            <label className="text-xs text-muted-foreground">Себестоимость, ₽</label>
-            <Input
-              type="number"
-              value={costPrice}
-              onChange={e => setCostPrice(e.target.value)}
-              placeholder="0"
-              className="h-8 mt-1"
-            />
-          </div>
+          {can.editCostPrice && (
+            <div>
+              <label className="text-xs text-muted-foreground">Себестоимость, ₽</label>
+              <Input
+                type="number"
+                value={costPrice}
+                onChange={e => setCostPrice(e.target.value)}
+                placeholder="0"
+                className="h-8 mt-1"
+              />
+            </div>
+          )}
           <div>
             <label className="text-xs text-muted-foreground">Группа</label>
             <Select value={groupId} onValueChange={setGroupId}>
