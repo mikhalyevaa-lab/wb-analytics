@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,8 +24,7 @@ async function paginateQuery<T>(queryFn: (from: number) => Promise<{ data: T[] |
 }
 
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)

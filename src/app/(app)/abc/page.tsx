@@ -1,13 +1,17 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { AbcTable, type AbcRow } from '@/components/abc/abc-table'
 import { AbcPanel } from '@/components/abc/abc-panel'
+import { Hint } from '@/components/ui/hint'
 
-function today() { return new Date().toISOString().split('T')[0] }
-function daysAgo(n: number) {
-  const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]
+function moscowDate(offsetDays = 0) {
+  const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  d.setUTCDate(d.getUTCDate() - offsetDays)
+  return d.toISOString().split('T')[0]
 }
+function today() { return moscowDate(0) }
+function daysAgo(n: number) { return moscowDate(n) }
 
 type Summary = {
   A: { count: number; revenue: number }
@@ -16,10 +20,11 @@ type Summary = {
 }
 
 const PRESETS = [
-  { label: '7д', days: 7 },
-  { label: '14д', days: 14 },
-  { label: '30д', days: 30 },
-  { label: '90д', days: 90 },
+  { label: 'Сегодня', days: 0 },
+  { label: '7 дн',   days: 7 },
+  { label: '14 дн',  days: 14 },
+  { label: '30 дн',  days: 30 },
+  { label: '90 дн',  days: 90 },
 ]
 
 function fmtM(n: number) {
@@ -36,7 +41,7 @@ export default function AbcPage() {
   const [missingCost, setMissingCost] = useState(0)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
-  const [activePreset, setActivePreset] = useState('30д')
+  const [activePreset, setActivePreset] = useState('30 дн')
   const [selectedRow, setSelectedRow]   = useState<AbcRow | null>(null)
 
   const [thA, setThA]   = useState(80)
@@ -72,10 +77,13 @@ export default function AbcPage() {
   }, [thA, thB, thMA, thMB])
 
   function applyPreset(label: string, days: number) {
-    const from = daysAgo(days), to = today()
+    const to = today()
+    const from = days === 0 ? to : daysAgo(days)
     setDateFrom(from); setDateTo(to); setActivePreset(label)
     load(from, to)
   }
+
+  useEffect(() => { load(dateFrom, dateTo) }, []) // eslint-disable-line
 
   function applyCustom() { setActivePreset(''); load(dateFrom, dateTo) }
 
@@ -90,7 +98,16 @@ export default function AbcPage() {
         {/* Header */}
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">ABC-анализ</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">ABC-анализ</h1>
+              <Hint width={340}>
+                <strong>ABC-анализ по выручке и маржинальности</strong><br /><br />
+                Делит все товары на три класса на основе двух критериев:<br /><br />
+                <strong>R (Revenue) — по выручке:</strong> A = топ {thA}% выручки, B = следующие {thB - thA}%, C = хвост.<br />
+                <strong>M (Margin) — по маржинальности:</strong> A ≥ {thMA}%, B ≥ {thMB}%, C — убыточные.<br /><br />
+                <strong>Источник данных:</strong> wb_sales (выкупы) за выбранный период. Требует заполненной себестоимости для маржи.
+              </Hint>
+            </div>
             <p className="text-sm text-zinc-400 mt-0.5">Классификация по выручке и маржинальности</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -98,8 +115,8 @@ export default function AbcPage() {
               <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
                 className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
                   activePreset === p.label
-                    ? 'bg-indigo-600 border-indigo-600 text-white'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border text-zinc-500 dark:text-zinc-400 hover:bg-muted'
                 }`}>
                 {p.label}
               </button>
@@ -115,14 +132,22 @@ export default function AbcPage() {
                 Применить
               </button>
             </div>
-            <button onClick={() => setShowSettings(s => !s)}
-              className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
-                showSettings
-                  ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200'
-                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-              }`}>
-              ⚙ Пороги
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setShowSettings(s => !s)}
+                className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+                  showSettings
+                    ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200'
+                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                }`}>
+                ⚙ Пороги
+              </button>
+              <Hint width={300}>
+                <strong>Настройка порогов ABC</strong><br /><br />
+                <strong>По выручке:</strong> A = товары, формирующие первые {thA}% суммарной выручки. A+B = первые {thB}%. Всё остальное — C.<br /><br />
+                <strong>По маржинальности:</strong> A ≥ {thMA}% маржи, B ≥ {thMB}%. Требует заполненной себестоимости.<br /><br />
+                Изменение порогов пересчитывает классификацию без нового запроса к API.
+              </Hint>
+            </div>
           </div>
         </div>
 
@@ -176,11 +201,19 @@ export default function AbcPage() {
                 C: 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400',
               }[cls]
               const desc = { A: `топ ${thA}%`, B: `${thA}–${thB}%`, C: 'хвост' }[cls]
+              const hint = {
+                A: `Товары-локомотивы. Формируют первые ${thA}% суммарной выручки при наименьшем числе SKU. Требуют постоянного наличия на складе и приоритетного продвижения.`,
+                B: `Стабильные товары. Формируют выручку в диапазоне ${thA}–${thB}%. Поддерживающая роль — важны, но не критичны. Следите за динамикой: B-товары могут расти в A или падать в C.`,
+                C: `Хвост ассортимента. Генерируют последние ${100 - thB}% выручки. Проверьте: есть ли смысл держать эти товары? Часто имеет смысл вывести их со склада или снизить цену для ускорения оборота.`,
+              }[cls]
               return (
                 <div key={cls} className={`rounded-xl border p-4 ${style}`}>
                   <div className="flex items-baseline justify-between mb-1">
                     <span className="text-2xl font-bold">{cls}</span>
-                    <span className="text-xs opacity-60">{desc}</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs opacity-60">{desc}</span>
+                      <Hint width={280}>{hint}</Hint>
+                    </div>
                   </div>
                   <div className="text-xl font-semibold">{s.count} SKU</div>
                   <div className="text-sm opacity-70">{fmtM(s.revenue)} ₽</div>
