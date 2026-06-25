@@ -12,6 +12,7 @@ import {
   Legend,
 } from 'recharts'
 import { Card, CardContent } from '@/components/ui/card'
+import { Hint } from '@/components/ui/hint'
 import type { DailySales } from '@/lib/queries'
 
 function fmtRub(n: number) {
@@ -39,9 +40,17 @@ export function SalesChart({ data }: { data: DailySales[] }) {
   return (
     <Card>
       <CardContent className="p-5">
-        <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-4">
-          Динамика заказов — 30 дней
-        </p>
+        <div className="flex items-center gap-1.5 mb-4">
+          <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Динамика заказов — 30 дней
+          </p>
+          <Hint width={300}>
+            <strong>Что показывает график</strong><br /><br />
+            <span style={{color:'#6366f1'}}>■</span> Сумма заказов (₽) — левая ось. Источник: воронка продаж WB.<br /><br />
+            <span style={{color:'#f59e0b'}}>■</span> Количество заказов (шт) — правая ось. Источник: воронка продаж WB.<br /><br />
+            Данные обновляются при синхронизации воронки.
+          </Hint>
+        </div>
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={data} margin={{ top: 4, right: 48, bottom: 0, left: 0 }}>
             <defs>

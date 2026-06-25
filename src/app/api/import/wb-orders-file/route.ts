@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 // Специализированный импорт файла wb_orders с барокодами, размерами, srid
 // Уникальный ключ: store_id + g_number + nm_id + barcode + date
@@ -9,8 +9,7 @@ import { adminDb } from '@/lib/admin'
 const CHUNK = 500
 
 export async function POST(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)

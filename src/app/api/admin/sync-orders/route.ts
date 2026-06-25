@@ -1,5 +1,5 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { adminDb } from '@/lib/admin'
 import { createWBClient, formatDateForWB, daysAgo } from '@/lib/wb-api'
 import { createClient } from '@supabase/supabase-js'
 
@@ -65,8 +65,8 @@ export async function POST(req: Request) {
 
       let total = 0
       for (let i = 0; i < deduped.length; i += 500) {
-        const { error, count } = await db
-          .from('wb_orders')
+        const { error, count } = await adminDb()
+    .from('wb_orders')
           .upsert(deduped.slice(i, i + 500), { onConflict: 'store_id,g_number,nm_id,barcode,date' })
         if (error) throw error
         total += count || 500

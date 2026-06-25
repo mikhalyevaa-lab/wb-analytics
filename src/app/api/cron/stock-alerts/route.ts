@@ -1,5 +1,5 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { adminDb } from '@/lib/admin'
 
 // Runs daily. Creates tasks for products with < 15 days of stock.
 // Deduplication: skips if open task with same nm_id + "Пустой склад" text exists.

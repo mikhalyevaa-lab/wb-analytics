@@ -1,11 +1,10 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 export async function GET(_req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -22,11 +21,10 @@ export async function GET(_req: NextRequest) {
   const curWeek = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
   const curYear = d.getUTCFullYear()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (adb.from('wb_sales_plan') as any)
+  const { data, error } = await adb.from('wb_sales_plan')
     .select('week_label,week_number,year,supplier_article,nm_id,orders_per_week,orders_per_day')
     .in('store_id', storeIds)
-    .or(`year.gt.${curYear},and(year.eq.${curYear},week_number.gte.${curWeek})`)
+    .or(`year.gt.${curYear},year.eq.${curYear}`)
     .order('year', { ascending: true })
     .order('week_number', { ascending: true })
     .order('supplier_article', { ascending: true })

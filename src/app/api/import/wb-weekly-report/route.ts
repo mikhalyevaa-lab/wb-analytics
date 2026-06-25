@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 const CHUNK_SIZE = 500
 
@@ -27,8 +27,7 @@ function n(val: unknown): number | null {
 }
 
 export async function POST(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)

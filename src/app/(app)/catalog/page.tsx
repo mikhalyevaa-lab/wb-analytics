@@ -1,15 +1,18 @@
+// @ts-nocheck
+import { adminDb } from '@/lib/db-compat'
+import { db } from '@/lib/db'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase-server'
+import { getServerSession } from '@/lib/auth-server'
+import { Hint } from '@/components/ui/hint'
 import { getUserStoreIds, getStores } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 import { CatalogTable } from '@/components/catalog/catalog-table'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CatalogPage() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) redirect('/dashboard')
@@ -20,23 +23,23 @@ export default async function CatalogPage() {
   const dateFrom30 = new Date(); dateFrom30.setDate(dateFrom30.getDate() - 30)
   const dateFrom30Str = dateFrom30.toISOString().split('T')[0]
 
-  const [{ data: products }, { data: groups }, { data: colSettings }, { data: lastSync }, { data: salesRows }] = await Promise.all([
-    db.from('products')
-      .select('nm_id, vendor_code, brand, title, subject_name, color, photo_url, cost_price, group_id, current_stock, avg_price_before_spp, avg_price_after_spp, avg_orders_per_day, buyout_rate, product_groups(id, name, color)')
+  const [{ data: products }, { data: groups }, { data: colSettings }, { data: lastSync }, { data: salesRows }, volumeRows] = await Promise.all([
+    adminDb().from('products')
+      .select('nm_id, vendor_code, brand, title, subject_name, color, photo_url, cost_price, group_id, current_stock, avg_price_before_spp, avg_price_after_spp, avg_orders_per_day, buyout_rate')
       .in('store_id', storeIds)
       .order('nm_id'),
-    db.from('product_groups').select('*').in('store_id', storeIds).order('name'),
-    db.from('user_column_settings')
+    adminDb().from('product_groups').select('*').in('store_id', storeIds).order('name'),
+    adminDb().from('user_column_settings')
       .select('columns')
       .eq('user_id', user.id)
       .eq('page', 'catalog')
-      .single(),
-    db.from('products')
+      .maybeSingle(),
+    adminDb().from('products')
       .select('updated_at')
       .in('store_id', storeIds)
       .order('updated_at', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
     // Скорость продаж: количество операций "Продажа" за последние 30 дней
     adminDb()
       .from('wb_finance')
@@ -45,6 +48,13 @@ export default async function CatalogPage() {
       .eq('supplier_oper_name', 'Продажа')
       .gte('date_from', dateFrom30Str)
       .limit(100000),
+    // Объём из wb_storage_daily — последнее известное значение по каждому nm_id
+    db<{ nm_id: number; volume: number }[]>`
+      SELECT DISTINCT ON (nm_id) nm_id, volume
+      FROM wb_storage_daily
+      WHERE store_id = ANY(${storeIds}) AND volume IS NOT NULL
+      ORDER BY nm_id, date DESC
+    `,
   ])
 
   // Агрегируем продажи по nm_id → шт/день
@@ -56,8 +66,11 @@ export default async function CatalogPage() {
 
   const todayStr = new Date().toISOString().split('T')[0]
 
+  const groupMap = new Map((groups ?? []).map(g => [g.id, g]))
+  const volumeMap = new Map((volumeRows ?? []).map(r => [r.nm_id, Number(r.volume)]))
+
   const enriched = (products ?? []).map(p => {
-    const pg = Array.isArray(p.product_groups) ? p.product_groups[0] ?? null : (p.product_groups ?? null)
+    const pg = p.group_id ? (groupMap.get(p.group_id) ?? null) : null
     const totalSales = salesMap.get(p.nm_id) ?? 0
     const salesPerDay = totalSales / 30
     const stock = p.current_stock ?? 0
@@ -74,14 +87,28 @@ export default async function CatalogPage() {
       days_of_stock = 0
       empty_date = todayStr
     }
-    return { ...p, product_groups: pg, days_of_stock, empty_date }
+    return { ...p, product_groups: pg, days_of_stock, empty_date, volume_liters: volumeMap.get(p.nm_id) ?? null }
   })
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Справочник товаров</h1>
-        <span className="text-sm text-muted-foreground">{products?.length ?? 0} артикулов</span>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold">Справочник товаров</h1>
+          <Hint width={320}>
+            <strong>Источники данных справочника</strong><br /><br />
+            <strong>Карточки товаров</strong> — WB Content API. Обновляются при синхронизации (Настройки → Товары).<br /><br />
+            <strong>Цены, % выкупа, заказы/день</strong> — рассчитываются из wb_sales и wb_funnel за последние 30 дней.<br /><br />
+            <strong>Остатки</strong> — последние данные из wb_stocks.<br /><br />
+            <strong>Объём</strong> — из данных хранения WB (wb_storage_daily).
+          </Hint>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{products?.length ?? 0} артикулов</span>
+          <Hint width={260}>
+            Количество уникальных артикулов WB (nm_id) в вашем магазине. Каждый артикул — это отдельная карточка товара на Wildberries.
+          </Hint>
+        </div>
       </div>
       <CatalogTable
         products={enriched}

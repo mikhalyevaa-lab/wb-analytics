@@ -1,74 +1,116 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
+import { db } from '@/lib/db'
 
-function daysAgo(n: number) {
-  const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]
+export const dynamic = 'force-dynamic'
+
+function moscowDaysAgo(n: number) {
+  const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString().split('T')[0]
 }
+function moscowToday() { return moscowDaysAgo(0) }
 
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) return NextResponse.json({ error: 'No store' }, { status: 404 })
 
-  const url = req.nextUrl
-  const dateFrom = url.searchParams.get('from') ?? daysAgo(30)
-  const dateTo = url.searchParams.get('to') ?? new Date().toISOString().split('T')[0]
+  const { searchParams } = new URL(req.url)
+  const dateFrom = searchParams.get('from') ?? moscowDaysAgo(30)
+  const dateTo   = searchParams.get('to')   ?? moscowToday()
 
-  const adb = adminDb()
+  // Топ по заказам — из воронки продаж (order_count, order_sum)
+  const funnelRows = await db<{
+    nm_id: number
+    orders: number
+    order_sum: number
+  }[]>`
+    SELECT nm_id,
+           COALESCE(SUM(order_count), 0)::int AS orders,
+           COALESCE(SUM(order_sum),   0)      AS order_sum
+    FROM wb_funnel
+    WHERE store_id = ANY(${storeIds})
+      AND date >= ${dateFrom}::date
+      AND date <= ${dateTo}::date
+    GROUP BY nm_id
+    HAVING SUM(order_count) > 0
+    ORDER BY orders DESC
+    LIMIT 50
+  `
 
-  const [ordersRes, productsRes] = await Promise.all([
-    adb.from('wb_orders')
-      .select('nm_id, total_price, discount_percent')
-      .in('store_id', storeIds)
-      .eq('is_cancel', false)
-      .gte('date', dateFrom)
-      .lte('date', dateTo + 'T23:59:59')
-      .limit(100000),
+  // Топ по выручке — из wb_sales (for_pay > 0 = выкупы)
+  const salesRows = await db<{
+    nm_id: number
+    revenue: number
+  }[]>`
+    SELECT nm_id,
+           COALESCE(SUM(for_pay), 0) AS revenue
+    FROM wb_sales
+    WHERE store_id = ANY(${storeIds})
+      AND is_realization = true
+      AND for_pay > 0
+      AND date >= ${dateFrom}::date
+      AND date <= (${dateTo}::date + INTERVAL '1 day')
+    GROUP BY nm_id
+    HAVING SUM(for_pay) > 0
+    ORDER BY revenue DESC
+    LIMIT 50
+  `
 
-    adb.from('products')
-      .select('nm_id, title, vendor_code, brand, subject_name, photo_url')
-      .in('store_id', storeIds)
-      .limit(5000),
-  ])
+  // Справочник товаров
+  const nmIds = [...new Set([
+    ...funnelRows.map(r => r.nm_id),
+    ...salesRows.map(r => r.nm_id),
+  ])]
 
-  type OrderRow = { nm_id: number; total_price: number | null; discount_percent: number | null }
-  type ProductRow = { nm_id: number; title: string | null; vendor_code: string | null; brand: string | null; subject_name: string | null; photo_url: string | null }
-  const orders = (ordersRes.data ?? []) as OrderRow[]
-  const products = (productsRes.data ?? []) as ProductRow[]
+  const products = nmIds.length
+    ? await db<{
+        nm_id: number
+        title: string | null
+        vendor_code: string | null
+        brand: string | null
+        subject_name: string | null
+        photo_url: string | null
+      }[]>`
+        SELECT nm_id, title, vendor_code, brand, subject_name, photo_url
+        FROM products
+        WHERE store_id = ANY(${storeIds}) AND nm_id = ANY(${nmIds})
+      `
+    : []
 
-  const productMap = new Map(products.map(p => [p.nm_id, p]))
+  const prodMap = new Map(products.map(p => [Number(p.nm_id), p]))
 
-  // Aggregate per nm_id
-  const aggMap = new Map<number, { orders: number; revenue: number }>()
-  for (const o of orders) {
-    const cur = aggMap.get(o.nm_id) ?? { orders: 0, revenue: 0 }
-    aggMap.set(o.nm_id, {
-      orders: cur.orders + 1,
-      revenue: cur.revenue + (o.total_price ?? 0) * (1 - (o.discount_percent ?? 0) / 100),
-    })
-  }
-
-  const rows = [...aggMap.entries()].map(([nm_id, agg]) => {
-    const p = productMap.get(nm_id)
+  const topByOrders = funnelRows.slice(0, 10).map(r => {
+    const p = prodMap.get(Number(r.nm_id))
     return {
-      nm_id,
-      title: p?.title ?? '',
-      vendor_code: p?.vendor_code ?? '',
-      brand: p?.brand ?? '',
+      nm_id:        Number(r.nm_id),
+      title:        p?.title        ?? '',
+      vendor_code:  p?.vendor_code  ?? String(r.nm_id),
+      brand:        p?.brand        ?? '',
       subject_name: p?.subject_name ?? '',
-      photo_url: p?.photo_url ?? null,
-      orders: agg.orders,
-      revenue: Math.round(agg.revenue),
+      photo_url:    p?.photo_url    ?? null,
+      orders:       Number(r.orders),
+      revenue:      Math.round(Number(r.order_sum)),
     }
   })
 
-  const topByOrders = [...rows].sort((a, b) => b.orders - a.orders).slice(0, 10)
-  const topByRevenue = [...rows].sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+  const topByRevenue = salesRows.slice(0, 10).map(r => {
+    const p = prodMap.get(Number(r.nm_id))
+    return {
+      nm_id:        Number(r.nm_id),
+      title:        p?.title        ?? '',
+      vendor_code:  p?.vendor_code  ?? String(r.nm_id),
+      brand:        p?.brand        ?? '',
+      subject_name: p?.subject_name ?? '',
+      photo_url:    p?.photo_url    ?? null,
+      orders:       0,
+      revenue:      Math.round(Number(r.revenue)),
+    }
+  })
 
-  return NextResponse.json({ topByOrders, topByRevenue })
+  return NextResponse.json({ topByOrders, topByRevenue, dateFrom, dateTo })
 }

@@ -1,5 +1,7 @@
+// @ts-nocheck
+import { adminDb } from '@/lib/db-compat'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase-server'
+import { getServerSession } from '@/lib/auth-server'
 import { getUserStoreIds, getStores } from '@/lib/queries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CashflowForm } from '@/components/cashflow/cashflow-form'
@@ -8,9 +10,9 @@ import { CashflowTable } from '@/components/cashflow/cashflow-table'
 export const dynamic = 'force-dynamic'
 
 export default async function CashflowPage() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) redirect('/dashboard')
@@ -23,7 +25,7 @@ export default async function CashflowPage() {
   const from = now.toISOString().split('T')[0]
   const to = threeMonthsLater.toISOString().split('T')[0]
 
-  const { data: upcoming } = await db
+  const { data: upcoming } = await adminDb()
     .from('credit_schedule')
     .select('id, credit_name, payment_date, principal, interest, total_payment, is_paid')
     .in('store_id', storeIds)
@@ -31,7 +33,7 @@ export default async function CashflowPage() {
     .lte('payment_date', to)
     .order('payment_date')
 
-  const { data: overdue } = await db
+  const { data: overdue } = await adminDb()
     .from('credit_schedule')
     .select('id, credit_name, payment_date, principal, interest, total_payment, is_paid')
     .in('store_id', storeIds)

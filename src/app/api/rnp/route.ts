@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 function daysAgo(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n)
@@ -20,8 +20,7 @@ function dateRange(from: string, to: string): string[] {
 }
 
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -33,21 +32,21 @@ export async function GET(req: NextRequest) {
 
   const adb = adminDb()
 
-  const [ordersRes, financeRes, adRes, stocksRes, dirRes, prodRes, funnelRes] = await Promise.all([
-    // Заказы по дням
-    adb.from('wb_orders')
-      .select('date, last_change_date, total_price, discount_percent, price_after_discount, nm_id, is_cancel')
+  const [financeRes, salesRes, adRes, stocksRes, dirRes, prodRes, funnelRes] = await Promise.all([
+    // wb_finance — для логистики, штрафов, доп.выплат (еженедельные данные)
+    adb.from('wb_finance')
+      .select('date_from, date_to, doc_type_name, ppvz_for_pay, quantity, nm_id, delivery_rub, penalty, additional_payment')
+      .in('store_id', storeIds)
+      .gte('date_from', dateFrom)
+      .lte('date_to', dateTo)
+      .limit(200000),
+
+    // wb_sales — ежедневные продажи с точными датами
+    adb.from('wb_sales')
+      .select('date, is_realization, for_pay, finished_price, nm_id')
       .in('store_id', storeIds)
       .gte('date', dateFrom)
       .lte('date', dateTo + 'T23:59:59')
-      .limit(200000),
-
-    // Продажи из wb_finance
-    adb.from('wb_finance')
-      .select('date_from, doc_type_name, ppvz_for_pay, quantity, nm_id, delivery_rub, penalty, additional_payment')
-      .in('store_id', storeIds)
-      .gte('date_from', dateFrom)
-      .lte('date_from', dateTo)
       .limit(200000),
 
     // Реклама по дням
@@ -74,30 +73,30 @@ export async function GET(req: NextRequest) {
       .in('store_id', storeIds)
       .limit(5000),
 
-    // Воронка — переходы в карточку по дням
+    // Воронка — заказы, корзина и переходы по дням (основной источник заказов)
     adb.from('wb_funnel')
-      .select('date, open_count')
+      .select('date, open_count, order_count, order_sum')
       .in('store_id', storeIds)
       .gte('date', dateFrom)
       .lte('date', dateTo)
       .limit(200000),
   ])
 
-  type OrderRow   = { date: string | null; last_change_date: string | null; total_price: number | null; discount_percent: number | null; price_after_discount: number | null; nm_id: number | null; is_cancel: boolean | null }
-  type FinRow     = { date_from: string | null; doc_type_name: string | null; ppvz_for_pay: number | null; quantity: number | null; nm_id: number | null; delivery_rub: number | null; penalty: number | null; additional_payment: number | null }
+  type FinRow     = { date_from: string | null; date_to: string | null; doc_type_name: string | null; ppvz_for_pay: number | null; quantity: number | null; nm_id: number | null; delivery_rub: number | null; penalty: number | null; additional_payment: number | null }
+  type SaleRow    = { date: string | null; is_realization: boolean | null; for_pay: number | null; finished_price: number | null; nm_id: number | null }
   type AdRow      = { date: string | null; spend: number | null }
   type StockRow   = { nm_id: number; quantity: number | null; date: string | null }
   type DirRow     = { doc_type_name: string; multiplier: number }
   type ProdRow    = { nm_id: number | null; cost_price: number | null }
-  type FunnelRow  = { date: string | null; open_count: number | null }
+  type FunnelRow  = { date: string | null; open_count: number | null; order_count: number | null; order_sum: number | null }
 
-  const orders    = (ordersRes.data  ?? []) as OrderRow[]
-  const finRows   = (financeRes.data ?? []) as FinRow[]
-  const adRows    = (adRes.data      ?? []) as AdRow[]
-  const stocks    = (stocksRes.data  ?? []) as StockRow[]
-  const dirRows   = (dirRes.data     ?? []) as DirRow[]
-  const prodRows  = (prodRes.data    ?? []) as ProdRow[]
-  const funnelRows = (funnelRes.data ?? []) as FunnelRow[]
+  const finRows    = (financeRes.data ?? []) as FinRow[]
+  const salesRows  = (salesRes.data   ?? []) as SaleRow[]
+  const adRows     = (adRes.data      ?? []) as AdRow[]
+  const stocks     = (stocksRes.data  ?? []) as StockRow[]
+  const dirRows    = (dirRes.data     ?? []) as DirRow[]
+  const prodRows   = (prodRes.data    ?? []) as ProdRow[]
+  const funnelRows = (funnelRes.data  ?? []) as FunnelRow[]
 
   // Мультипликаторы
   const multMap = new Map<string, number>()
@@ -108,24 +107,28 @@ export async function GET(req: NextRequest) {
   for (const p of prodRows) if (p.nm_id && p.cost_price) costMap.set(p.nm_id, p.cost_price)
 
   // Остатки ВБ — берём только строки с последней датой снапшота, суммируем quantity
-  const latestDate = stocks.reduce((max, r) => r.date && r.date > max ? r.date : max, '')
+  const toStr = (d: unknown) => typeof d === 'string' ? d.slice(0, 10) : d instanceof Date ? d.toISOString().slice(0, 10) : ''
+  const latestDate = stocks.reduce((max, r) => { const s = toStr(r.date); return s > max ? s : max }, '')
   const totalStock = stocks
-    .filter(r => r.date?.slice(0, 10) === latestDate?.slice(0, 10))
+    .filter(r => toStr(r.date) === latestDate)
     .reduce((s, r) => s + (r.quantity ?? 0), 0)
 
-  // Переходы из воронки по дням
-  const funnelMap = new Map<string, number>()
+  // Воронка — агрегируем заказы и переходы по дням
+  const funnelMap = new Map<string, { open_count: number; order_count: number; order_sum: number }>()
   for (const f of funnelRows) {
     const day = f.date?.slice(0, 10)
     if (!day) continue
-    funnelMap.set(day, (funnelMap.get(day) ?? 0) + (f.open_count ?? 0))
+    const cur = funnelMap.get(day) ?? { open_count: 0, order_count: 0, order_sum: 0 }
+    cur.open_count  += f.open_count  ?? 0
+    cur.order_count += f.order_count ?? 0
+    cur.order_sum   += f.order_sum   ?? 0
+    funnelMap.set(day, cur)
   }
 
   // Агрегация по дням
   type DayAcc = {
     orders_count: number
     orders_sum: number
-    orders_sum_retail: number
     sales_count: number
     sales_revenue: number
     returns_count: number
@@ -139,39 +142,52 @@ export async function GET(req: NextRequest) {
   const dayMap = new Map<string, DayAcc>()
 
   const emptyDay = (): DayAcc => ({
-    orders_count: 0, orders_sum: 0, orders_sum_retail: 0,
+    orders_count: 0, orders_sum: 0,
     sales_count: 0, sales_revenue: 0,
     returns_count: 0, returns_amount: 0,
     logistics: 0, penalties: 0, additional: 0, ad_spend: 0,
   })
 
-  // Заказы
-  for (const o of orders) {
-    if (o.is_cancel) continue
-    const day = o.date?.slice(0, 10)
+  // Продажи (выкупы) — из wb_sales
+  for (const s of salesRows) {
+    if (s.is_realization === false) continue
+    const day = s.date?.slice(0, 10)
     if (!day) continue
     const acc = dayMap.get(day) ?? emptyDay()
-    acc.orders_count++
-    // Цена заказа (после скидки) — приоритет над расчётом
-    const priceAfter = o.price_after_discount
-      ?? ((o.total_price ?? 0) * (1 - (o.discount_percent ?? 0) / 100))
-    acc.orders_sum += priceAfter
-    acc.orders_sum_retail += o.total_price ?? 0
+    acc.sales_count++
+    acc.sales_revenue += s.for_pay ?? s.finished_price ?? 0
     dayMap.set(day, acc)
   }
 
-  // Финансы (продажи + возвраты + логистика)
+  // wb_finance — только логистика, штрафы, доп.выплаты
+  // Данные еженедельные: распределяем равномерно по дням периода (date_from → date_to)
   for (const r of finRows) {
-    const day = r.date_from?.slice(0, 10)
-    if (!day) continue
-    const mult = multMap.get(r.doc_type_name ?? '') ?? 0
-    const acc = dayMap.get(day) ?? emptyDay()
-    if (mult === 1) { acc.sales_count += r.quantity ?? 0; acc.sales_revenue += r.ppvz_for_pay ?? 0 }
-    if (mult === -1) { acc.returns_count += r.quantity ?? 0; acc.returns_amount += Math.abs(r.ppvz_for_pay ?? 0) }
-    acc.logistics  += Math.abs(r.delivery_rub ?? 0)
-    acc.penalties  += Math.abs(r.penalty ?? 0)
-    acc.additional += r.additional_payment ?? 0
-    dayMap.set(day, acc)
+    const wStart = r.date_from?.slice(0, 10)
+    const wEnd   = r.date_to?.slice(0, 10) ?? wStart
+    if (!wStart || !wEnd) continue
+
+    const weekDays: string[] = []
+    const cur = new Date(wStart + 'T00:00:00Z')
+    const end = new Date(wEnd + 'T00:00:00Z')
+    while (cur <= end) {
+      const d = cur.toISOString().slice(0, 10)
+      if (d >= dateFrom && d <= dateTo) weekDays.push(d)
+      cur.setUTCDate(cur.getUTCDate() + 1)
+    }
+    if (!weekDays.length) continue
+
+    const totalDays = Math.max(1,
+      (new Date(wEnd + 'T00:00:00Z').getTime() - new Date(wStart + 'T00:00:00Z').getTime()) / 86400000 + 1
+    )
+    const frac = 1 / totalDays
+
+    for (const day of weekDays) {
+      const acc = dayMap.get(day) ?? emptyDay()
+      acc.logistics  += Math.abs(r.delivery_rub ?? 0) * frac
+      acc.penalties  += Math.abs(r.penalty ?? 0) * frac
+      acc.additional += (r.additional_payment ?? 0) * frac
+      dayMap.set(day, acc)
+    }
   }
 
   // Реклама
@@ -187,26 +203,29 @@ export async function GET(req: NextRequest) {
   const allDates = dateRange(dateFrom, dateTo)
   const byDate = allDates.map(date => {
     const acc = dayMap.get(date) ?? emptyDay()
+    const funnel = funnelMap.get(date) ?? { open_count: 0, order_count: 0, order_sum: 0 }
 
-    // Потенциальная ЧП = выручка - логистика - штрафы + доп - себестоимость
-    // (без учёта конкретных nm_id — общий расчёт)
+    // Заказы — из воронки (wb_funnel), чтобы данные совпадали со страницей Воронка
+    const ordersCount = funnel.order_count
+    const ordersSum   = funnel.order_sum
+
     const grossProfit = acc.sales_revenue - acc.logistics - acc.penalties + acc.additional
 
-    // ДРР = расход на рекламу / выручка от заказов * 100
-    const drr = acc.orders_sum > 0 ? (acc.ad_spend / acc.orders_sum) * 100 : null
+    // ДРР = расход на рекламу / сумма заказов * 100
+    const drr = ordersSum > 0 ? (acc.ad_spend / ordersSum) * 100 : null
 
     // CR% (заказы → продажи)
-    const crOrderToSale = acc.orders_count > 0 ? (acc.sales_count / acc.orders_count) * 100 : null
+    const crOrderToSale = ordersCount > 0 ? (acc.sales_count / ordersCount) * 100 : null
 
-    const openCount = funnelMap.get(date) ?? 0
+    const openCount = funnel.open_count
 
     return {
       date,
-      orders_count:    acc.orders_count,
-      orders_sum:      Math.round(acc.orders_sum),
-      sales_count:     acc.sales_count,
+      orders_count:    ordersCount,
+      orders_sum:      Math.round(ordersSum),
+      sales_count:     Math.round(acc.sales_count),
       sales_revenue:   Math.round(acc.sales_revenue),
-      returns_count:   acc.returns_count,
+      returns_count:   Math.round(acc.returns_count),
       returns_amount:  Math.round(acc.returns_amount),
       logistics:       Math.round(acc.logistics),
       penalties:       Math.round(acc.penalties),
@@ -214,7 +233,7 @@ export async function GET(req: NextRequest) {
       gross_profit:    Math.round(grossProfit),
       drr:             drr !== null ? Math.round(drr * 10) / 10 : null,
       cr_order_sale:   crOrderToSale !== null ? Math.round(crOrderToSale * 10) / 10 : null,
-      avg_order_price: acc.orders_count > 0 ? Math.round(acc.orders_sum / acc.orders_count) : null,
+      avg_order_price: ordersCount > 0 ? Math.round(ordersSum / ordersCount) : null,
       open_count:      openCount,
       cost_per_click:  openCount > 0 ? Math.round(acc.ad_spend / openCount * 100) / 100 : null,
     }
@@ -232,9 +251,9 @@ export async function GET(req: NextRequest) {
     gross_profit:   acc.gross_profit   + d.gross_profit,
   }), { orders_count: 0, orders_sum: 0, sales_count: 0, sales_revenue: 0, returns_amount: 0, logistics: 0, ad_spend: 0, gross_profit: 0 })
 
-  // Время последней загрузки — берём max last_change_date из заказов
-  const lastOrdersSync = orders.reduce((max, r) => {
-    const t = r.last_change_date ?? ''
+  // Время последней синхронизации воронки
+  const lastOrdersSync = funnelRows.reduce((max, r) => {
+    const t = r.date ?? ''
     return t > max ? t : max
   }, '')
 

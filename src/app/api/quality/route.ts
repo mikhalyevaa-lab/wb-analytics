@@ -1,11 +1,10 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 export async function GET() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -27,20 +26,25 @@ export async function GET() {
     storageRes,
     weeklyReportRes,
   ] = await Promise.all([
-    // SKU без себестоимости
-    adb.from('products')
-      .select('nm_id, vendor_code, title, brand, photo_url, current_stock, avg_orders_per_day')
-      .in('store_id', storeIds)
-      .or('cost_price.is.null,cost_price.eq.0')
-      .order('current_stock', { ascending: false })
-      .limit(200),
+    // SKU без себестоимости — используем прямой SQL вместо .or() (не поддерживается в db-compat)
+    { data: await (async () => {
+      const { db } = await import('@/lib/db')
+      return db<{nm_id:number,vendor_code:string|null,title:string|null,brand:string|null,photo_url:string|null,current_stock:number|null,avg_orders_per_day:number|null}[]>`
+        SELECT nm_id, vendor_code, title, brand, photo_url, current_stock, avg_orders_per_day
+        FROM products
+        WHERE store_id = ANY(${storeIds}::uuid[])
+          AND (cost_price IS NULL OR cost_price = 0)
+        ORDER BY current_stock DESC NULLS LAST
+        LIMIT 200
+      `
+    })() },
 
     // Токен аналитики
     adb.from('stores')
       .select('name, wb_analytics_token, updated_at')
       .in('id', storeIds)
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с заказами
     adb.from('wb_orders')
@@ -48,7 +52,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с продажами (выкупами)
     adb.from('wb_sales')
@@ -56,7 +60,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с финансами
     adb.from('wb_finance')
@@ -64,7 +68,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date_from', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с данными рекламы
     adb.from('wb_ad_spend')
@@ -72,7 +76,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с остатками — прямо из таблицы
     adb.from('wb_stocks')
@@ -80,7 +84,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последнее обновление справочника товаров
     adb.from('products')
@@ -88,7 +92,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('updated_at', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с данными воронки
     adb.from('wb_funnel')
@@ -96,7 +100,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний день с данными платного хранения
     (adb.from('wb_storage_daily') as any)
@@ -104,7 +108,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
 
     // Последний финансовый отчёт WB
     adb.from('wb_weekly_reports')
@@ -112,7 +116,7 @@ export async function GET() {
       .in('store_id', storeIds)
       .order('date_to', { ascending: false })
       .limit(1)
-      .single(),
+      .maybeSingle(),
   ])
 
   type ProductRow  = { nm_id: number | null; vendor_code: string | null; title: string | null; brand: string | null; photo_url: string | null; current_stock: number | null; avg_orders_per_day: number | null }

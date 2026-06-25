@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 // Маппинг склада WB → федеральный округ и рекомендуемый склад назначения
 const WAREHOUSE_OKRUG: Record<string, { okrug: string; label: string }> = {
@@ -57,8 +57,7 @@ function getOkrug(warehouse: string): { okrug: string; label: string } {
 }
 
 export async function GET() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)

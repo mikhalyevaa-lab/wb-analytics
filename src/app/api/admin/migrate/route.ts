@@ -1,5 +1,5 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { adminDb } from '@/lib/admin'
 import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'

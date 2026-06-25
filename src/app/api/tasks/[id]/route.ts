@@ -1,13 +1,13 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -22,7 +22,7 @@ export async function PATCH(
     if (key in body) patch[key] = body[key]
   }
 
-  const { data, error } = await db.from('tasks')
+  const { data, error } = await adminDb().from('tasks')
     .update(patch)
     .eq('id', id)
     .in('store_id', storeIds)
@@ -36,15 +36,14 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) return NextResponse.json({ error: 'No store' }, { status: 404 })
 
   const { id } = await params
-  const { error } = await db.from('tasks')
+  const { error } = await adminDb().from('tasks')
     .delete()
     .eq('id', id)
     .in('store_id', storeIds)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { Hint } from '@/components/ui/hint'
 
 type DayData = {
   date: string
@@ -42,18 +43,18 @@ type ApiResponse = {
   lastAdSync: string | null
 }
 
-const ROWS: { key: keyof DayData | 'avg_order_price_budget' | 'potential_profit_pct'; label: string; format: 'money' | 'count' | 'pct' | 'text' | 'placeholder'; full?: boolean }[] = [
-  { key: 'orders_sum',               label: 'Сумма по заказам ₽',   format: 'money',       full: true  },
-  { key: 'gross_profit',             label: 'Потенц. ЧП',            format: 'placeholder'              },
-  { key: 'potential_profit_pct',     label: '% потенц. прибыли',     format: 'placeholder'              },
-  { key: 'orders_count',             label: 'Заказов',               format: 'count'                    },
-  { key: 'sales_count',              label: 'Продаж',                format: 'count'                    },
-  { key: 'open_count',               label: 'Переходов',             format: 'count'                    },
-  { key: 'ad_spend',                 label: 'Бюджет ₽',              format: 'money',       full: true  },
-  { key: 'drr',                      label: 'ДРР %',                 format: 'pct'                      },
-  { key: 'avg_order_price_budget',   label: 'Цена заказа (Б/З)',     format: 'money'                    },
-  { key: 'cost_per_click',           label: 'Цена перехода',         format: 'money'                    },
-  { key: 'cr_order_sale',            label: 'CR% заказ→продажа',     format: 'pct'                      },
+const ROWS: { key: keyof DayData | 'avg_order_price_budget' | 'potential_profit_pct'; label: string; format: 'money' | 'count' | 'pct' | 'text' | 'placeholder'; full?: boolean; hint?: string }[] = [
+  { key: 'orders_sum',               label: 'Сумма по заказам ₽',   format: 'money',       full: true,  hint: 'Суммарная стоимость заказов по дню. Источник: Воронка (wb_funnel).'                              },
+  { key: 'gross_profit',             label: 'Потенц. ЧП',            format: 'placeholder',              hint: 'В разработке. Плановая чистая прибыль с учётом себестоимости и комиссий.'                       },
+  { key: 'potential_profit_pct',     label: '% потенц. прибыли',     format: 'placeholder',              hint: 'В разработке. Доля чистой прибыли от суммы заказов.'                                            },
+  { key: 'orders_count',             label: 'Заказов',               format: 'count',                    hint: 'Количество заказов за день. Источник: Воронка (wb_funnel).'                                      },
+  { key: 'sales_count',              label: 'Продаж',                format: 'count',                    hint: 'Количество выкупов за день. Источник: Продажи (wb_sales, is_realization=true).'                  },
+  { key: 'open_count',               label: 'Переходов',             format: 'count',                    hint: 'Число переходов в карточку товара из рекламы. Источник: Реклама (wb_funnel.open_count).'         },
+  { key: 'ad_spend',                 label: 'Бюджет ₽',              format: 'money',       full: true,  hint: 'Расходы на рекламу за день. Источник: Реклама (wb_ad_spend).'                                   },
+  { key: 'drr',                      label: 'ДРР %',                 format: 'pct',                      hint: 'Доля рекламных расходов от суммы заказов. ДРР = Бюджет / Сумма заказов × 100.'                  },
+  { key: 'avg_order_price_budget',   label: 'Цена заказа (Б/З)',     format: 'money',                    hint: 'Средняя стоимость привлечения одного заказа через рекламу. = Бюджет / Заказов.'                  },
+  { key: 'cost_per_click',           label: 'Цена перехода',         format: 'money',                    hint: 'Средняя стоимость одного перехода в карточку. = Бюджет / Переходов.'                            },
+  { key: 'cr_order_sale',            label: 'CR% заказ→продажа',     format: 'pct',                      hint: 'Конверсия из заказа в выкуп. = Продажи / Заказов × 100. Норма для WB: 50–80%.'                  },
 ]
 
 function fmt(val: number | null, format: string, full = false): string {
@@ -84,26 +85,24 @@ function profitColor(v: number): string {
   return ''
 }
 
-function daysAgo(n: number): string {
-  const d = new Date(); d.setDate(d.getDate() - n)
+function moscowDate(offsetDays = 0): string {
+  const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  d.setUTCDate(d.getUTCDate() - offsetDays)
   return d.toISOString().split('T')[0]
 }
 
-function todayStr(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
 const PRESETS = [
-  { label: '7д',  from: () => daysAgo(7)  },
-  { label: '14д', from: () => daysAgo(14) },
-  { label: '30д', from: () => daysAgo(30) },
-  { label: '60д', from: () => daysAgo(60) },
-  { label: '90д', from: () => daysAgo(90) },
+  { label: 'Сегодня', days: 0  },
+  { label: '7 дн',   days: 7  },
+  { label: '14 дн',  days: 14 },
+  { label: '30 дн',  days: 30 },
+  { label: '90 дн',  days: 90 },
 ]
 
 export function RnpMatrix() {
-  const [from, setFrom] = useState(daysAgo(30))
-  const [to,   setTo]   = useState(todayStr)
+  const [activePreset, setActivePreset] = useState('30 дн')
+  const [from, setFrom] = useState(() => moscowDate(30))
+  const [to,   setTo]   = useState(() => moscowDate(0))
   const [data, setData] = useState<ApiResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -112,6 +111,7 @@ export function RnpMatrix() {
     setLoading(true)
     try {
       const res = await fetch(`/api/rnp?from=${f}&to=${t}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json() as ApiResponse
       setData(json)
     } finally {
@@ -119,7 +119,7 @@ export function RnpMatrix() {
     }
   }
 
-  useEffect(() => { load(from, to) }, [])
+  useEffect(() => { load(from, to) }, []) // eslint-disable-line
 
   // Scroll to today column after load
   useEffect(() => {
@@ -131,8 +131,10 @@ export function RnpMatrix() {
     }
   }, [data])
 
-  function applyPreset(f: string) {
-    const t = todayStr()
+  function applyPreset(p: { label: string; days: number }) {
+    const t = moscowDate(0)
+    const f = p.days === 0 ? t : moscowDate(p.days)
+    setActivePreset(p.label)
     setFrom(f); setTo(t)
     load(f, t)
   }
@@ -147,11 +149,11 @@ export function RnpMatrix() {
         {PRESETS.map(p => (
           <button
             key={p.label}
-            onClick={() => applyPreset(p.from())}
+            onClick={() => applyPreset(p)}
             className={`px-3 py-1 rounded-lg text-sm font-medium border transition-colors ${
-              from === p.from()
-                ? 'bg-white text-black border-white'
-                : 'border-border text-muted-foreground hover:border-white/50'
+              activePreset === p.label
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'border-border text-zinc-500 hover:bg-muted'
             }`}
           >
             {p.label}
@@ -161,14 +163,14 @@ export function RnpMatrix() {
           <input
             type="date"
             value={from}
-            onChange={e => setFrom(e.target.value)}
+            onChange={e => { setFrom(e.target.value); setActivePreset('') }}
             className="bg-card border border-border rounded px-2 py-1 text-sm"
           />
           <span className="text-muted-foreground">—</span>
           <input
             type="date"
             value={to}
-            onChange={e => setTo(e.target.value)}
+            onChange={e => { setTo(e.target.value); setActivePreset('') }}
             className="bg-card border border-border rounded px-2 py-1 text-sm"
           />
           <button
@@ -180,29 +182,46 @@ export function RnpMatrix() {
         </div>
       </div>
 
-      {/* Summary cards */}
+      {/* KPI виджеты */}
       {totals && (() => {
-        const todayData = data?.byDate.find(d => d.date === data.today)
-        const cards = [
-          { label: 'Сумма заказов', val: totals.orders_sum,         money: true  },
-          { label: 'Заказов',       val: todayData?.orders_count ?? null, money: false, hint: 'за сегодня' },
-          { label: 'Продаж',        val: todayData?.sales_count  ?? null, money: false, hint: 'за сегодня' },
-          { label: 'Потенц. ЧП',    val: null as number | null,    money: true, placeholder: true },
-          { label: 'Бюджет РК',     val: totals.ad_spend,          money: true  },
-          { label: 'ДРР общий',     val: totals.orders_sum > 0 ? Math.round(totals.ad_spend / totals.orders_sum * 1000) / 10 : null, money: false, pct: true },
-          { label: 'Остаток ВБ',    val: data?.stockTotal ?? 0,    money: false, unit: 'шт' },
-        ] as Array<{ label: string; val: number | null; money: boolean; placeholder?: boolean; pct?: boolean; unit?: string; hint?: string }>
+        const widgets = [
+          {
+            label: 'Сумма заказов',
+            val: totals.orders_sum,
+            money: true,
+            hint: <><strong>Сумма заказов</strong><br /><br />Суммарная стоимость всех заказов за период. Источник: метод Воронка (wb_funnel). Включает заказы, которые ещё не выкуплены.</>,
+          },
+          {
+            label: 'Заказы',
+            val: totals.orders_count,
+            money: false,
+            hint: <><strong>Количество заказов</strong><br /><br />Общее число заказов за период. Источник: метод Воронка (wb_funnel). Не учитывает отмены.</>,
+          },
+          {
+            label: 'Продажи',
+            val: totals.sales_count,
+            money: false,
+            hint: <><strong>Количество продаж</strong><br /><br />Выкупленные позиции за период. Источник: метод Продажи (wb_sales, is_realization=true).</>,
+          },
+          {
+            label: 'Бюджет РК',
+            val: totals.ad_spend,
+            money: true,
+            hint: <><strong>Бюджет рекламных кампаний</strong><br /><br />Суммарные расходы на рекламу за период. Источник: метод Реклама (wb_ad_spend). WB хранит данные за последние 90 дней.</>,
+          },
+        ] as Array<{ label: string; val: number | null; money: boolean; hint: React.ReactNode }>
         return (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {cards.map(c => (
+            {widgets.map(c => (
               <div key={c.label} className="bg-card rounded-xl border border-border p-3">
-                <p className="text-xs text-muted-foreground">{c.label}{c.hint && <span className="ml-1 opacity-50">{c.hint}</span>}</p>
-                <p className={`text-xl font-bold mt-0.5 tabular-nums ${c.label === 'Потенц. ЧП' ? profitColor(c.val ?? 0) : ''}`}>
-                  {c.placeholder ? '—'
-                    : c.val == null ? '—'
-                    : c.pct ? c.val.toFixed(1) + '%'
+                <div className="flex items-center gap-1 mb-1">
+                  <p className="text-xs text-muted-foreground">{c.label}</p>
+                  <Hint width={280}>{c.hint}</Hint>
+                </div>
+                <p className="text-xl font-bold tabular-nums">
+                  {c.val == null ? '—'
                     : c.money ? fmt(c.val, 'money', true) + ' ₽'
-                    : Math.round(c.val).toLocaleString('ru') + (c.unit ? ' ' + c.unit : '')}
+                    : Math.round(c.val).toLocaleString('ru')}
                 </p>
               </div>
             ))}
@@ -256,7 +275,10 @@ export function RnpMatrix() {
                     className={`border-b border-border/30 ${ri % 2 === 0 ? 'bg-black/10' : ''}`}
                   >
                     <td className="sticky left-0 z-10 bg-card px-3 py-1.5 font-medium text-muted-foreground border-r border-border whitespace-nowrap">
-                      {row.label}
+                      <span className="inline-flex items-center gap-1">
+                        {row.label}
+                        {row.hint && <span onClick={e => e.stopPropagation()}><Hint width={260}>{row.hint}</Hint></span>}
+                      </span>
                     </td>
                     {dates.map(d => {
                       const isToday = d.date === data?.today

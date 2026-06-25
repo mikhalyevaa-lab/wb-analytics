@@ -1,42 +1,24 @@
-import { createServerClient } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/cron', '/api/sync', '/_next', '/favicon.ico']
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
+export async function proxy(req: NextRequest) {
+  const { pathname } = req.nextUrl
+
+  if (PUBLIC_PATHS.some(p => pathname.startsWith(p)) || pathname === '/favicon.ico') {
+    return NextResponse.next()
+  }
+
+  // Проверяем наличие сессионной куки (быстрая проверка без DB)
+  const sessionCookie = req.cookies.get('better-auth.session_token')
+  if (!sessionCookie?.value) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
-
-  const isLoginPage = request.nextUrl.pathname === '/login'
-  const isPublic = request.nextUrl.pathname.startsWith('/api/')
-
-  if (!user && !isLoginPage && !isPublic) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return NextResponse.redirect(new URL('/login', req.url))
   }
 
-  if (user && isLoginPage) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
-  }
-
-  return supabaseResponse
+  return NextResponse.next()
 }
 
 export const config = {

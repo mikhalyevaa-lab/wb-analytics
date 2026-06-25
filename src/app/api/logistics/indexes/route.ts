@@ -1,18 +1,18 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 
 // GET /api/logistics/indexes?weeks=8
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) return NextResponse.json({ rows: [] })
 
   const weeks = parseInt(req.nextUrl.searchParams.get('weeks') ?? '8')
-  const { data, error } = await db
+  const { data, error } = await adminDb()
     .from('wb_logistics_indexes')
     .select('id, week_date, irp, localization_index')
     .in('store_id', storeIds)
@@ -27,8 +27,7 @@ export async function GET(req: NextRequest) {
 // body: { week_date: '2026-06-16', irp: 1.23, localization_index: 45.6 }
 // or bulk: { rows: [{ week_date, irp, localization_index }] }
 export async function POST(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -47,7 +46,7 @@ export async function POST(req: NextRequest) {
     updated_at: new Date().toISOString(),
   }))
 
-  const { error } = await db
+  const { error } = await adminDb()
     .from('wb_logistics_indexes')
     .upsert(upsertData, { onConflict: 'store_id,week_date' })
 

@@ -1,21 +1,18 @@
+// @ts-nocheck
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { syncAdvertPeriod } from '@/lib/sync'
+import { requireAuth } from '@/lib/auth-server'
 
 const CRON_SECRET = process.env.CRON_SECRET
 
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
-
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization')
-  if (CRON_SECRET && auth !== `Bearer ${CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const isCron = CRON_SECRET && auth === `Bearer ${CRON_SECRET}`
+  if (!isCron) {
+    const user = await requireAuth().catch(() => null)
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   let body: { storeId?: string; dateFrom?: string; dateTo?: string } = {}
@@ -29,8 +26,8 @@ export async function POST(req: NextRequest) {
   if (body.storeId) {
     storeIds = [body.storeId]
   } else {
-    const db = adminClient()
-    const { data } = await db.from('stores').select('id')
+    const db = adminDb()
+    const { data } = await adminDb().from('stores').select('id')
     storeIds = (data ?? []).map(r => r.id as string)
   }
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { Hint } from '@/components/ui/hint'
 
 function moscowDate(offsetDays = 0) {
   const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
@@ -173,8 +174,14 @@ export default function FunnelPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <div className="flex items-baseline gap-3">
+          <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Воронка продаж</h1>
+            <Hint width={340}>
+              <strong>Воронка продаж WB</strong><br /><br />
+              Показывает путь покупателя: Просмотр карточки → Добавление в корзину → Заказ → Выкуп.<br /><br />
+              <strong>Источник:</strong> метод аналитики WB (nmReportDetail). Данные агрегируются по дням и хранятся в таблице wb_funnel.<br /><br />
+              <strong>Важно:</strong> WB отдаёт данные с задержкой 1–2 дня. Данные за сегодня могут быть неполными.
+            </Hint>
             {syncLabel && (
               <span className="text-xs text-muted-foreground">данные по {syncLabel}</span>
             )}
@@ -233,13 +240,28 @@ export default function FunnelPage() {
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'Просмотры',    value: fmtNum(s.open_count),  sub: 'кол-во', color: '' },
-              { label: 'В корзину',    value: fmtNum(s.cart_count),  sub: fmtPct(s.add_to_cart_pct) + ' из просм.', color: 'text-blue-600 dark:text-blue-400' },
-              { label: 'Заказы',       value: fmtNum(s.order_count), sub: fmtPct(s.cart_to_order_pct) + ' из корзины', color: 'text-indigo-600 dark:text-indigo-400' },
-              { label: 'Сумма заказов', value: fmtRub(s.order_sum),  sub: 'руб.', color: '' },
+              {
+                label: 'Просмотры', value: fmtNum(s.open_count), sub: 'кол-во', color: '',
+                hint: 'Суммарное количество просмотров карточек товаров за выбранный период. Один уникальный пользователь может засчитываться несколько раз.',
+              },
+              {
+                label: 'В корзину', value: fmtNum(s.cart_count), sub: fmtPct(s.add_to_cart_pct) + ' из просм.', color: 'text-blue-600 dark:text-blue-400',
+                hint: `Количество добавлений товаров в корзину. Конверсия ${fmtPct(s.add_to_cart_pct)} считается как: В корзину ÷ Просмотры × 100%.`,
+              },
+              {
+                label: 'Заказы', value: fmtNum(s.order_count), sub: fmtPct(s.cart_to_order_pct) + ' из корзины', color: 'text-indigo-600 dark:text-indigo-400',
+                hint: `Количество оформленных заказов. Конверсия ${fmtPct(s.cart_to_order_pct)} считается как: Заказы ÷ В корзину × 100%. Не все заказы будут выкуплены.`,
+              },
+              {
+                label: 'Сумма заказов', value: fmtRub(s.order_sum), sub: 'руб.', color: '',
+                hint: 'Суммарная стоимость всех оформленных заказов за период. Это не выручка — часть заказов будет отменена или возвращена.',
+              },
             ].map(card => (
               <div key={card.label} className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">
-                <p className="text-xs text-zinc-500 uppercase tracking-wide">{card.label}</p>
+                <div className="flex items-center gap-1">
+                  <p className="text-xs text-zinc-500 uppercase tracking-wide">{card.label}</p>
+                  <Hint width={280}>{card.hint}</Hint>
+                </div>
                 <p className={`text-lg font-bold mt-1 ${card.color || 'text-zinc-900 dark:text-zinc-100'}`}>{card.value}</p>
                 <p className="text-xs text-zinc-400 mt-0.5">{card.sub}</p>
               </div>
@@ -273,8 +295,15 @@ export default function FunnelPage() {
 
             return (
               <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-                <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800">
+                <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-1.5">
                   <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Конверсии</p>
+                  <Hint width={320}>
+                    <strong>Конверсии воронки</strong><br /><br />
+                    <strong>Просмотры → Корзина:</strong> какая доля просмотров заканчивается добавлением в корзину. Зависит от фото, цены и позиции в выдаче.<br /><br />
+                    <strong>Корзина → Заказ:</strong> какая доля добавленных в корзину заканчивается оформлением заказа. Зависит от цены и доверия к продавцу.<br /><br />
+                    Серая полоска под основной — показатель за предыдущий период (для сравнения). Стрелки ↑↓ показывают изменение к предыдущему периоду.<br /><br />
+                    <strong>★ Лучший</strong> — артикул с наибольшей конверсией на этом шаге (минимум 50 просмотров / 10 корзин).
+                  </Hint>
                 </div>
                 <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {convRows.map(row => (
@@ -348,7 +377,15 @@ export default function FunnelPage() {
             return (
               <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
                 <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Динамика по периодам</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Динамика по периодам</p>
+                    <Hint width={300}>
+                      <strong>График сравнения периодов</strong><br /><br />
+                      <span style={{color:'#6366f1'}}>■</span> Текущий период — тёмный столбик.<br />
+                      <span style={{color:'#e5e7eb'}}>■</span> Предыдущий период той же длины — светлый столбик.<br /><br />
+                      Переключайте метрику кнопками справа: Просмотры, В корзину, Заказы или Сумма заказов.
+                    </Hint>
+                  </div>
                   <div className="flex gap-1 flex-wrap">
                     {CHART_METRICS.map(m => (
                       <button key={m.key} onClick={() => setChartMetric(m.key)}
@@ -392,10 +429,15 @@ export default function FunnelPage() {
       {/* Table by period */}
       {!loading && (data?.byPeriod?.length ?? 0) > 0 && (
         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-1.5">
             <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
               По {aggLevel === 'week' ? 'неделям' : 'дням'}
             </p>
+            <Hint width={300}>
+              Каждая строка — один день (или неделя). Данные отсортированы от новых к старым.<br /><br />
+              <strong>→ %</strong> (первый) — конверсия Просмотры → Корзина.<br />
+              <strong>→ %</strong> (второй) — конверсия Корзина → Заказ.
+            </Hint>
           </div>
           <div className="overflow-x-auto max-h-96 overflow-y-auto">
             <table className="w-full text-sm">
@@ -432,10 +474,19 @@ export default function FunnelPage() {
       {!loading && (data?.byNm?.length ?? 0) > 0 && (
         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
           <div className="px-5 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              По артикулам
-              {nmSearch && <span className="ml-2 text-xs text-zinc-400">{filteredNm.length} из {data?.byNm?.length}</span>}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                По артикулам
+                {nmSearch && <span className="ml-2 text-xs text-zinc-400">{filteredNm.length} из {data?.byNm?.length}</span>}
+              </p>
+              <Hint width={320}>
+                <strong>Таблица по артикулам</strong><br /><br />
+                Каждая строка — один товар (nm_id). Клик по строке переходит на страницу товара.<br /><br />
+                <strong>→ %</strong> (первый) — конверсия Просмотры → Корзина для этого товара.<br />
+                <strong>→ %</strong> (второй) — конверсия Корзина → Заказ для этого товара.<br /><br />
+                Сортировка по любому столбцу — клик по заголовку. Повторный клик меняет направление.
+              </Hint>
+            </div>
             <input
               type="text"
               value={nmSearch}

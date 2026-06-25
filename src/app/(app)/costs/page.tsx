@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase-server'
+import { getServerSession } from '@/lib/auth-server'
 import { getUserStoreIds, getStores, getManualCosts } from '@/lib/queries'
 import { CATEGORY_LABELS } from '@/lib/types'
 import { CostsForm } from '@/components/costs/costs-form'
@@ -23,9 +23,9 @@ function monthBounds(offset = 0) {
 }
 
 export default async function CostsPage() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) redirect('/dashboard')

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase-server'
+import { getServerSession } from '@/lib/auth-server'
 import { getUserStoreIds, getPnL, getManualCosts } from '@/lib/queries'
 import { PnLBreakdown } from '@/components/pnl/pnl-breakdown'
 import { DeductionsSection } from '@/components/pnl/deductions-section'
@@ -62,9 +62,9 @@ export default async function PnLPage({
 }: {
   searchParams: Promise<{ period?: string; from?: string; to?: string }>
 }) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) redirect('/dashboard')

@@ -1,18 +1,9 @@
+import { adminDb } from '@/lib/db-compat'
+import { requireAuth } from '@/lib/auth-server'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { createClient as createServerClient } from '@/lib/supabase-server'
-
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
 
 export async function PATCH(req: NextRequest) {
-  const db = await createServerClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
@@ -20,7 +11,7 @@ export async function PATCH(req: NextRequest) {
 
   if (!store_id) return NextResponse.json({ error: 'Missing store_id' }, { status: 400 })
 
-  const { data: membership } = await db
+  const { data: membership } = await adminDb()
     .from('user_stores')
     .select('store_id')
     .eq('user_id', user.id)
@@ -29,7 +20,7 @@ export async function PATCH(req: NextRequest) {
 
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const admin = adminClient()
+  const admin = adminDb()
 
   if (store_name !== undefined || wb_token !== undefined || wb_analytics_token !== undefined) {
     const updates: Record<string, unknown> = {}

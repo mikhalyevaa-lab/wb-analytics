@@ -1,6 +1,6 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
-import { adminDb } from '@/lib/admin'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 
 export const dynamic = 'force-dynamic'
@@ -16,6 +16,7 @@ const STALE_AFTER: Record<string, number> = {
   commissions: 250,
   funnel:      25,
   products:    25,
+  advertising: 25,
 }
 
 const LABELS: Record<string, string> = {
@@ -28,6 +29,7 @@ const LABELS: Record<string, string> = {
   commissions: 'Комиссии',
   funnel:      'Воронка',
   products:    'Товары',
+  advertising: 'Реклама',
 }
 
 export interface DataQualityItem {
@@ -42,14 +44,23 @@ export interface DataQualityItem {
 }
 
 export async function GET() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) return NextResponse.json({ items: [] })
 
   const adb = adminDb()
+
+  // Реклама не пишет в sync_log — берём статус напрямую из wb_ad_spend
+  const { db } = await import('@/lib/db')
+  const adRows = await db<{ max_date: string | null; cnt: number }[]>`
+    SELECT MAX(date)::text AS max_date, COUNT(*)::int AS cnt
+    FROM wb_ad_spend WHERE store_id = ANY(${storeIds})
+  `
+  const adMaxDate = adRows[0]?.max_date ?? null
+  const adCount   = Number(adRows[0]?.cnt ?? 0)
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: logs } = await (adb.from('sync_log') as any)
     .select('method,status,rows_count,created_at')
@@ -73,6 +84,29 @@ export async function GET() {
   const methods = Object.keys(LABELS)
 
   const items: DataQualityItem[] = methods.map(method => {
+    // Реклама — собственный источник статуса
+    if (method === 'advertising') {
+      if (!adMaxDate) {
+        return { method, label: LABELS[method], lastRun: null, lastOk: null, lastRows: null, lastStatus: null, status: 'never', hoursAgo: null }
+      }
+      // hoursAgo считаем от конца последнего дня с данными (midnight следующего дня)
+      const lastDayEnd = new Date(adMaxDate)
+      lastDayEnd.setDate(lastDayEnd.getDate() + 1)
+      const hoursAgo = Math.round((now - lastDayEnd.getTime()) / 3600000 * 10) / 10
+      const threshold = STALE_AFTER['advertising']!
+      const status: DataQualityItem['status'] = hoursAgo > threshold ? 'stale' : 'ok'
+      return {
+        method,
+        label: LABELS[method],
+        lastRun: lastDayEnd.toISOString(),
+        lastOk:  lastDayEnd.toISOString(),
+        lastRows: adCount,
+        lastStatus: 'ok',
+        status,
+        hoursAgo,
+      }
+    }
+
     const info = byMethod[method]
     if (!info) return { method, label: LABELS[method], lastRun: null, lastOk: null, lastRows: null, lastStatus: null, status: 'never', hoursAgo: null }
 

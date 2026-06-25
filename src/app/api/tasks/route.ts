@@ -1,10 +1,10 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   const status = req.nextUrl.searchParams.get('status')
 
-  let query = db.from('tasks')
+  let query = adminDb().from('tasks')
     .select('*')
     .in('store_id', storeIds)
     .order('created_at', { ascending: false })
@@ -25,8 +25,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   if (!body.title?.trim()) return NextResponse.json({ error: 'title required' }, { status: 400 })
 
-  const { data, error } = await db.from('tasks').insert({
+  const { data, error } = await adminDb().from('tasks').insert({
     store_id: storeIds[0],
     title: body.title.trim(),
     description: body.description ?? null,

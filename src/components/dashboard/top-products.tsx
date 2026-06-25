@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { Hint } from '@/components/ui/hint'
 
 interface ProductRow {
   nm_id: number
@@ -16,15 +17,20 @@ interface ProductRow {
 function fmtRub(n: number) { return n.toLocaleString('ru', { maximumFractionDigits: 0 }) + ' ₽' }
 
 const PRESETS = [
-  { label: '7д', days: 7 },
-  { label: '30д', days: 30 },
-  { label: '90д', days: 90 },
+  { label: 'Сегодня', days: 0 },
+  { label: '7 дн',   days: 7 },
+  { label: '14 дн',  days: 14 },
+  { label: '30 дн',  days: 30 },
+  { label: '90 дн',  days: 90 },
 ]
 
-function today() { return new Date().toISOString().split('T')[0] }
-function daysAgo(n: number) {
-  const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]
+function moscowDate(offsetDays = 0) {
+  const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  d.setUTCDate(d.getUTCDate() - offsetDays)
+  return d.toISOString().split('T')[0]
 }
+function today() { return moscowDate(0) }
+function daysAgo(n: number) { return moscowDate(n) }
 
 function TopList({ rows, metric }: { rows: ProductRow[]; metric: 'orders' | 'revenue' }) {
   const max = rows[0]?.[metric] ?? 1
@@ -70,8 +76,8 @@ function TopList({ rows, metric }: { rows: ProductRow[]; metric: 'orders' | 'rev
 }
 
 export function TopProducts() {
-  const [activePreset, setActivePreset] = useState('30д')
-  const [dateFrom, setDateFrom] = useState(daysAgo(30))
+  const [activePreset, setActivePreset] = useState('Сегодня')
+  const [dateFrom, setDateFrom] = useState(daysAgo(0))
   const [topByOrders, setTopByOrders] = useState<ProductRow[]>([])
   const [topByRevenue, setTopByRevenue] = useState<ProductRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -90,10 +96,10 @@ export function TopProducts() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load(dateFrom) }, [])
+  useEffect(() => { load(today()) }, []) // eslint-disable-line
 
   function applyPreset(label: string, days: number) {
-    const from = daysAgo(days)
+    const from = days === 0 ? today() : daysAgo(days)
     setDateFrom(from); setActivePreset(label)
     load(from)
   }
@@ -102,10 +108,10 @@ export function TopProducts() {
     <div className="flex gap-1">
       {PRESETS.map(p => (
         <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
-          className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${
+          className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
             activePreset === p.label
-              ? 'bg-indigo-600 border-indigo-600 text-white'
-              : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'border-border text-zinc-500 dark:text-zinc-400 hover:bg-muted'
           }`}>
           {p.label}
         </button>
@@ -138,7 +144,13 @@ export function TopProducts() {
       {/* Top by Orders */}
       <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Топ-10 по заказам</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Топ-10 по заказам</h2>
+            <Hint width={280}>
+              Товары с наибольшим числом заказов за выбранный период.<br /><br />
+              Источник: воронка продаж WB (поле order_count). Обновляется при синхронизации воронки.
+            </Hint>
+          </div>
           {presetBar}
         </div>
         {loading ? skeleton : <TopList rows={topByOrders} metric="orders" />}
@@ -150,7 +162,13 @@ export function TopProducts() {
       {/* Top by Revenue */}
       <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Топ-10 по выручке</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Топ-10 по выручке</h2>
+            <Hint width={280}>
+              Товары с наибольшей суммой выкупов за выбранный период.<br /><br />
+              Источник: wb_sales (is_realization = true, for_pay &gt; 0). Учитывает только фактически выкупленные заказы.
+            </Hint>
+          </div>
           {presetBar}
         </div>
         {loading ? skeleton : <TopList rows={topByRevenue} metric="revenue" />}

@@ -1,102 +1,156 @@
-require('dotenv').config({path:'/Users/glazzki/Desktop/Claude_workspace/projects/wb-analytics/.env.local'})
-const https=require('https')
-const {createClient}=require('@supabase/supabase-js')
+/**
+ * Загрузка архивных данных воронки из Excel в wb_funnel.
+ * Файл: Новая таблица (1).xlsx — Oct 2025 — Mar 2026 (10 877 строк)
+ *
+ * Маппинг колонок Excel → wb_funnel:
+ *   Дата                   → date
+ *   Артикул WB             → nm_id
+ *   Переходы в карточку    → open_count
+ *   Положили в корзину     → cart_count
+ *   Добавили в отложенные  → add_to_wishlist_count
+ *   Заказали, шт           → order_count
+ *   Заказали на сумму, ₽   → order_sum
+ *   Выкупили, шт           → buyout_count
+ *   Выкупили на сумму, ₽   → buyout_sum
+ *   Процент выкупа         → buyout_percent
+ *   Конверсия в корзину, % → add_to_cart_conversion
+ *   Конверсия в заказ, %   → cart_to_order_conversion
+ */
+require('dotenv').config({ path: '/Users/glazzki/Desktop/Claude_workspace/projects/wb-analytics/.env.local' })
+const { Pool } = require('pg')
+const XLSX = require('xlsx')
 
-const db=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY)
-const S='73d40959-1920-4c68-a0f5-3684846b923f'
-const BATCH=20
-const PAUSE=22000
+const STORE_ID = 'f809c4fb-3ddb-460a-8174-bc872d06571b'
+const BATCH = 500
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
-function wait(ms){return new Promise(r=>setTimeout(r,ms))}
-
-async function postFunnel(token,nmIds,start,end){
-  const body=JSON.stringify({selectedPeriod:{start,end},nmIds,skipDeletedNm:false,aggregationLevel:'day'})
-  return new Promise((res,rej)=>{
-    const req=https.request({hostname:'seller-analytics-api.wildberries.ru',path:'/api/analytics/v3/sales-funnel/products/history',method:'POST',headers:{'Authorization':token,'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}},r=>{
-      let d=''; r.on('data',c=>d+=c); r.on('end',()=>{ try{res(JSON.parse(d))}catch{res(d)} })
-    })
-    req.on('error',rej); req.setTimeout(30000,()=>{req.destroy();rej(new Error('timeout'))})
-    req.write(body); req.end()
-  })
+function toDate(v) {
+  if (!v) return null
+  let d = v instanceof Date ? v : new Date(String(v))
+  if (isNaN(d.getTime())) return null
+  return d.toISOString().slice(0, 10) // YYYY-MM-DD
 }
 
-function chunkArray(arr,size){const c=[];for(let i=0;i<arr.length;i+=size)c.push(arr.slice(i,i+size));return c}
+function toInt(v) {
+  if (v == null || v === '' || v === '-') return null
+  const n = parseInt(String(v), 10)
+  return isNaN(n) ? null : n
+}
 
-function addDays(dateStr,n){const d=new Date(dateStr);d.setDate(d.getDate()+n);return d.toISOString().split('T')[0]}
+function toFloat(v) {
+  if (v == null || v === '' || v === '-') return null
+  const n = parseFloat(String(v))
+  return isNaN(n) ? null : n
+}
 
-async function run(){
-  const {data:store}=await db.from('stores').select('wb_analytics_token,wb_token').eq('id',S).limit(1)
-  const token=store[0].wb_analytics_token||store[0].wb_token
-  
-  const {data:prods}=await db.from('products').select('nm_id').eq('store_id',S).not('nm_id','is',null).limit(200)
-  const nmIds=prods.map(p=>p.nm_id)
-  console.log(`Загружаем воронку: ${nmIds.length} товаров, ${chunkArray(nmIds,BATCH).length} батчей/чанк`)
-  
-  // Год назад по квартально
-  const today=new Date().toISOString().split('T')[0]
-  const yearAgo=addDays(today,-364)
-  
-  // 30-дневные чанки
-  const chunks=[]
-  let cs=yearAgo
-  while(cs<=today){
-    const ce=addDays(cs,29)>today?today:addDays(cs,29)
-    chunks.push({s:cs,e:ce})
-    cs=addDays(ce,1)
+function parseXlsx(path) {
+  console.log(`Читаем ${path}...`)
+  const wb = XLSX.readFile(path, { cellDates: true, dense: true })
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null })
+
+  const headers = raw[0].map(h => h == null ? '' : String(h).trim())
+  const h = Object.fromEntries(headers.map((k, i) => [k, i]))
+
+  const rows = []
+  for (let i = 1; i < raw.length; i++) {
+    const r = raw[i]
+    if (!r || r.every(v => v == null)) continue
+
+    const date  = toDate(r[h['Дата']])
+    const nm_id = toInt(r[h['Артикул WB']])
+    if (!date || !nm_id) continue
+
+    rows.push({
+      store_id:                 STORE_ID,
+      nm_id,
+      date,
+      open_count:               toInt(r[h['Переходы в карточку']]),
+      cart_count:               toInt(r[h['Положили в корзину']]),
+      add_to_wishlist_count:    toInt(r[h['Добавили в отложенные']]),
+      order_count:              toInt(r[h['Заказали, шт']]),
+      order_sum:                toFloat(r[h['Заказали на сумму, ₽']]),
+      buyout_count:             toInt(r[h['Выкупили, шт']]),
+      buyout_sum:               toFloat(r[h['Выкупили на сумму, ₽']]),
+      buyout_percent:           toFloat(r[h['Процент выкупа']]),
+      add_to_cart_conversion:   toFloat(r[h['Конверсия в корзину, %']]),
+      cart_to_order_conversion: toFloat(r[h['Конверсия в заказ, %']]),
+      created_at:               new Date().toISOString(),
+    })
   }
-  console.log(`Чанков: ${chunks.length} (по 30 дней)`)
-  
-  const batches=chunkArray(nmIds,BATCH)
-  let totalInserted=0
-  
-  for(let ci=0;ci<chunks.length;ci++){
-    const {s,e}=chunks[ci]
-    console.log(`\nЧанк ${ci+1}/${chunks.length}: ${s} — ${e}`)
-    const items=[]
-    
-    for(let bi=0;bi<batches.length;bi++){
-      if(bi>0) await wait(PAUSE)
-      const batch=batches[bi]
-      let retries=3
-      while(retries>0){
-        const r=await postFunnel(token,batch,s,e)
-        if(r.status===429){console.log('  Rate limit, ждём 60с...'); await wait(60000); retries--;continue}
-        if(r.title&&r.status!==200){console.log('  Error batch',bi,':',r.title); break}
-        const rows=Array.isArray(r)?r:(r.data??[])
-        items.push(...rows)
-        console.log(`  Батч ${bi+1}/${batches.length}: ${rows.length} строк`)
-        break
+  console.log(`  ${rows.length} строк`)
+  return rows
+}
+
+async function upsertBatch(client, rows) {
+  if (!rows.length) return
+
+  const cols = [
+    'store_id','nm_id','date',
+    'open_count','cart_count','add_to_wishlist_count',
+    'order_count','order_sum',
+    'buyout_count','buyout_sum','buyout_percent',
+    'add_to_cart_conversion','cart_to_order_conversion',
+    'created_at'
+  ]
+
+  const placeholders = rows.map((_, ri) =>
+    `(${cols.map((_, ci) => `$${ri * cols.length + ci + 1}`).join(',')})`
+  ).join(',')
+
+  const values = rows.flatMap(r => cols.map(c => r[c] ?? null))
+
+  const updateCols = [
+    'open_count','cart_count','add_to_wishlist_count',
+    'order_count','order_sum',
+    'buyout_count','buyout_sum','buyout_percent',
+    'add_to_cart_conversion','cart_to_order_conversion'
+  ]
+  const updateSet = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ')
+
+  await client.query(`
+    INSERT INTO wb_funnel (${cols.join(',')})
+    VALUES ${placeholders}
+    ON CONFLICT (store_id, nm_id, date)
+    DO UPDATE SET ${updateSet}
+  `, values)
+}
+
+async function main() {
+  const rows = parseXlsx('/Users/glazzki/Downloads/Новая таблица (1).xlsx')
+
+  const client = await pool.connect()
+  try {
+    const { rows: [{ count: before }] } = await client.query(
+      `SELECT COUNT(*) FROM wb_funnel WHERE store_id=$1`, [STORE_ID]
+    )
+    const { rows: [{ min: minBefore, max: maxBefore }] } = await client.query(
+      `SELECT MIN(date) as min, MAX(date) as max FROM wb_funnel WHERE store_id=$1`, [STORE_ID]
+    )
+    console.log(`\nСтрок в БД до: ${before} (${minBefore ?? '—'} → ${maxBefore ?? '—'})`)
+
+    let done = 0
+    for (let i = 0; i < rows.length; i += BATCH) {
+      await upsertBatch(client, rows.slice(i, i + BATCH))
+      done += Math.min(BATCH, rows.length - i)
+      if (done % 3000 === 0 || done === rows.length) {
+        process.stdout.write(`\r  ${done}/${rows.length} (${(done/rows.length*100).toFixed(0)}%)`)
       }
     }
-    
-    if(!items.length){console.log('  Нет данных'); await wait(2000); continue}
-    
-    // Upsert
-    const rows=items.map(it=>({
-      store_id:S,nm_id:it.nmId,date:it.date,
-      open_card_count:it.openCardCount??0,
-      add_to_cart_count:it.addToCartCount??0,
-      orders_count:it.ordersCount??0,
-      orders_sum:it.ordersSumRub??0,
-      buyouts_count:it.buyoutsCount??0,
-      buyouts_sum:it.buyoutsSumRub??0,
-      cancel_count:it.cancelCount??0,
-      cancel_sum:it.cancelSumRub??0,
-      avg_order_value:it.avgOrderSumRub??0,
-      avg_buyout_value:it.avgBuyoutSumRub??0
-    }))
-    
-    let ins=0
-    for(let i=0;i<rows.length;i+=500){
-      const {error}=await db.from('wb_funnel').upsert(rows.slice(i,i+500),{onConflict:'store_id,nm_id,date',ignoreDuplicates:false})
-      if(error) console.log('  Upsert error:', error.message)
-      else ins+=Math.min(500,rows.length-i)
-    }
-    totalInserted+=ins
-    console.log(`  Upserted: ${ins} строк. Итого: ${totalInserted}`)
-    await wait(2000)
+    console.log()
+
+    const { rows: [{ count: after }] } = await client.query(
+      `SELECT COUNT(*) FROM wb_funnel WHERE store_id=$1`, [STORE_ID]
+    )
+    const { rows: [{ min, max }] } = await client.query(
+      `SELECT MIN(date) as min, MAX(date) as max FROM wb_funnel WHERE store_id=$1`, [STORE_ID]
+    )
+    console.log(`\n✅ Строк в БД: ${before} → ${after} (+${after - before})`)
+    console.log(`   Период в БД: ${min} → ${max}`)
+  } finally {
+    client.release()
+    await pool.end()
   }
-  
-  console.log(`\n=== ГОТОВО: ${totalInserted} строк загружено ===`)
 }
-run().catch(e=>console.error('FATAL:',e.message))
+
+main().catch(e => { console.error(e.message); process.exit(1) })

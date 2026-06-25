@@ -1,21 +1,15 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createWBClient, parseWBNum } from '@/lib/wb-api'
+import { requireAuth } from '@/lib/auth-server'
 
 const CRON_SECRET = process.env.CRON_SECRET
 
-function adminClient() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
-
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function upsertRows(
-  admin: ReturnType<typeof adminClient>,
+  admin: any,
   table: string,
   rows: Record<string, unknown>[],
   conflict: string,
@@ -33,11 +27,13 @@ async function upsertRows(
 
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization')
-  if (CRON_SECRET && auth !== `Bearer ${CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const isCron = CRON_SECRET && auth === `Bearer ${CRON_SECRET}`
+  if (!isCron) {
+    const user = await requireAuth().catch(() => null)
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const admin = adminClient()
+  const admin = adminDb()
   const { data: stores } = await admin.from('stores').select('id, name, wb_token')
   if (!stores?.length) return NextResponse.json({ error: 'No stores found' }, { status: 404 })
 
@@ -47,10 +43,9 @@ export async function POST(req: NextRequest) {
   for (const store of stores) {
     const wb = createWBClient(store.wb_token)
     const startMs = Date.now()
-    const { data: logRow } = await admin
+    await admin
       .from('sync_log')
       .insert({ store_id: store.id, method: 'tariffs', status: 'running' })
-      .select('id').single()
 
     let total = 0
     let logError: string | null = null
@@ -118,15 +113,13 @@ export async function POST(req: NextRequest) {
       results[store.name] = { error: logError }
     }
 
-    if (logRow?.id) {
-      await admin.from('sync_log').update({
-        finished_at: new Date().toISOString(),
-        rows_count:  total,
-        status:      logError ? 'error' : 'ok',
-        error:       logError,
-        duration_ms: Date.now() - startMs,
-      }).eq('id', logRow.id)
-    }
+    await admin.from('sync_log').update({
+      finished_at: new Date().toISOString(),
+      rows_count:  total,
+      status:      logError ? 'error' : 'ok',
+      error:       logError,
+      duration_ms: Date.now() - startMs,
+    }).eq('store_id', store.id).eq('method', 'tariffs').eq('status', 'running')
   }
 
   return NextResponse.json({ ok: true, results })

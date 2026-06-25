@@ -1,5 +1,6 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 
 export async function GET(
@@ -10,14 +11,13 @@ export async function GET(
   const nmId = parseInt(nm_id, 10)
   if (isNaN(nmId)) return NextResponse.json({ error: 'Invalid nm_id' }, { status: 400 })
 
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) return NextResponse.json([])
 
-  const { data: latestRow } = await db
+  const { data: latestRow } = await adminDb()
     .from('wb_stocks')
     .select('date')
     .in('store_id', storeIds)
@@ -28,7 +28,7 @@ export async function GET(
 
   if (!latestRow?.date) return NextResponse.json([])
 
-  const { data: rows } = await db
+  const { data: rows } = await adminDb()
     .from('wb_stocks')
     .select('tech_size, quantity')
     .in('store_id', storeIds)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback, useRef, useEffect, useId } from 'react'
+import { Hint } from '@/components/ui/hint'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ export interface CatalogProduct {
   avg_price_after_spp: number | null
   avg_orders_per_day: number | null
   buyout_rate: number | null
+  volume_liters: number | null
   product_groups: { id: string; name: string; color: string } | null
   days_of_stock: number | null
   empty_date: string | null
@@ -40,8 +42,7 @@ export interface ProductGroup {
 
 export const ALL_COLUMNS = [
   { key: 'photo', label: 'Фото', sortable: false },
-  { key: 'nm_id', label: 'Артикул WB', sortable: true },
-  { key: 'vendor_code', label: 'Арт. поставщика', sortable: true },
+  { key: 'article', label: 'Артикул', sortable: true },
   { key: 'subject_name', label: 'Предмет', sortable: true },
   { key: 'group', label: 'Группа', sortable: true },
   { key: 'color', label: 'Цвет', sortable: true },
@@ -52,6 +53,7 @@ export const ALL_COLUMNS = [
   { key: 'avg_orders_per_day', label: 'Заказов/день', sortable: true },
   { key: 'current_stock', label: 'Остаток', sortable: true },
   { key: 'empty_date', label: 'Пустой склад', sortable: true },
+  { key: 'volume_liters', label: 'Объём, л', sortable: true },
   { key: 'stock_cost_value', label: 'Себест. остатков', sortable: true },
   { key: 'stock_retail_value', label: 'Стоим. остатков (до СПП)', sortable: true },
 ] as const
@@ -59,7 +61,7 @@ export const ALL_COLUMNS = [
 export type ColumnKey = typeof ALL_COLUMNS[number]['key']
 
 export const DEFAULT_COLUMNS: ColumnKey[] = [
-  'photo', 'nm_id', 'vendor_code', 'subject_name', 'group',
+  'photo', 'article', 'subject_name', 'group',
   'buyout_rate', 'avg_price_before_spp', 'avg_price_after_spp', 'avg_orders_per_day',
   'current_stock', 'empty_date', 'stock_cost_value', 'stock_retail_value',
 ]
@@ -152,7 +154,8 @@ function sortProducts(products: CatalogProduct[], key: SortKey, dir: SortDir): C
   if (!key) return products
   return [...products].sort((a, b) => {
     let av: unknown, bv: unknown
-    if (key === 'group') { av = a.product_groups?.name ?? ''; bv = b.product_groups?.name ?? '' }
+    if (key === 'article') { av = a.vendor_code ?? a.nm_id.toString(); bv = b.vendor_code ?? b.nm_id.toString() }
+    else if (key === 'group') { av = a.product_groups?.name ?? ''; bv = b.product_groups?.name ?? '' }
     else if (key === 'stock_cost_value' || key === 'stock_retail_value' || key === 'empty_date') { av = computedVal(a, key); bv = computedVal(b, key) }
     else { av = (a as unknown as Record<string, unknown>)[key]; bv = (b as unknown as Record<string, unknown>)[key] }
     if (av == null && bv == null) return 0
@@ -161,6 +164,18 @@ function sortProducts(products: CatalogProduct[], key: SortKey, dir: SortDir): C
     const cmp = av < bv ? -1 : av > bv ? 1 : 0
     return dir === 'asc' ? cmp : -cmp
   })
+}
+
+const COLUMN_HINTS: Partial<Record<ColumnKey, string>> = {
+  article:             'Артикул поставщика (основной) и артикул WB (nm_id) под ним. Клик по строке открывает карточку товара.',
+  buyout_rate:         '% выкупа = выкупленные заказы / все заказы × 100%. Рассчитывается по данным wb_sales за последние 30 дней.',
+  avg_orders_per_day:  'Среднее количество заказов в день за последние 30 дней по данным воронки продаж WB.',
+  empty_date:          'Прогноз даты, когда закончится текущий остаток. Красный — менее 15 дней, жёлтый — менее 30.',
+  volume_liters:       'Объём упаковки в литрах (Д × Ш × В / 1 000 000). Источник: данные хранения WB (wb_storage_daily).',
+  stock_cost_value:    'Себестоимость × текущий остаток. Требует заполненной себестоимости в карточке товара.',
+  stock_retail_value:  'Цена до СПП × текущий остаток. Показывает розничную стоимость склада.',
+  avg_price_before_spp:'Средняя цена товара до применения скидки постоянного покупателя (СПП).',
+  avg_price_after_spp: 'Средняя цена, которую реально платит покупатель после применения СПП.',
 }
 
 export function CatalogTable({
@@ -235,8 +250,7 @@ export function CatalogTable({
       const header = exportCols.map(c => c.label)
       const rows = sorted.map(p => exportCols.map(c => {
         switch (c.key) {
-          case 'nm_id': return p.nm_id
-          case 'vendor_code': return p.vendor_code ?? ''
+          case 'article': return `${p.vendor_code ?? ''} (${p.nm_id})`
           case 'subject_name': return p.subject_name ?? ''
           case 'group': return p.product_groups?.name ?? ''
           case 'color': return p.color ?? ''
@@ -246,6 +260,7 @@ export function CatalogTable({
           case 'avg_price_after_spp': return p.avg_price_after_spp ?? ''
           case 'avg_orders_per_day': return p.avg_orders_per_day ?? ''
           case 'current_stock': return p.current_stock ?? 0
+          case 'volume_liters': return p.volume_liters != null ? Number(p.volume_liters) : ''
           case 'stock_cost_value': return p.cost_price != null ? (p.current_stock ?? 0) * p.cost_price : ''
           case 'stock_retail_value': return p.avg_price_before_spp != null ? (p.current_stock ?? 0) * p.avg_price_before_spp : ''
           default: return ''
@@ -375,8 +390,11 @@ export function CatalogTable({
         )}
         <span className="ml-auto text-sm text-muted-foreground">{sorted.length} из {products.length}</span>
         {syncedAt && (
-          <span className="text-xs text-muted-foreground border-l pl-3">
+          <span className="text-xs text-muted-foreground border-l pl-3 flex items-center gap-1">
             Обновлено: {new Date(syncedAt).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            <Hint width={280}>
+              Дата последнего обновления карточек товаров из WB Content API. Чтобы обновить — запустите синхронизацию в Настройках → Синхронизация данных → Товары.
+            </Hint>
           </span>
         )}
       </div>
@@ -400,11 +418,15 @@ export function CatalogTable({
             {cols.map(col => (
               <div
                 key={col.key}
-                className={`px-3 py-3 select-none ${colWidth(col.key)} ${col.sortable ? 'cursor-pointer hover:text-foreground' : ''}`}
+                className={`px-3 py-3 select-none flex items-center gap-1 ${colWidth(col.key)} ${col.sortable ? 'cursor-pointer hover:text-foreground' : ''}`}
                 onClick={() => col.sortable && handleSort(col.key)}
               >
-                {col.label}
-                {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                <span>{col.label}{sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}</span>
+                {COLUMN_HINTS[col.key] && (
+                  <span onClick={e => e.stopPropagation()}>
+                    <Hint width={260}>{COLUMN_HINTS[col.key]}</Hint>
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -482,8 +504,7 @@ export function CatalogTable({
 function colWidth(key: ColumnKey): string {
   const widths: Partial<Record<ColumnKey, string>> = {
     photo: 'w-14 flex-none',
-    nm_id: 'w-28 flex-none',
-    vendor_code: 'w-36 flex-none',
+    article: 'w-44 flex-none',
     subject_name: 'w-36 flex-none',
     group: 'w-28 flex-none',
     color: 'w-24 flex-none',
@@ -495,6 +516,7 @@ function colWidth(key: ColumnKey): string {
     current_stock: 'w-20 flex-none text-right',
     empty_date: 'w-32 flex-none text-right',
     stock_cost_value: 'w-36 flex-none text-right',
+    volume_liters: 'w-24 flex-none text-right',
     stock_retail_value: 'w-40 flex-none text-right',
   }
   return widths[key] ?? 'flex-1'
@@ -511,17 +533,15 @@ function CellValue({ col, product: p }: { col: ColumnKey; product: CatalogProduc
       return p.photo_url
         ? <img src={p.photo_url} alt="" className="h-10 w-8 object-cover rounded" />
         : <div className="h-10 w-8 bg-muted rounded" />
-    case 'nm_id':
+    case 'article':
       return (
-        <a
-          href={`/catalog/${p.nm_id}`}
-          className="font-mono text-xs text-blue-400 hover:underline"
-          title="Открыть дк-матрицу"
-        >
-          {p.nm_id}
-        </a>
+        <div>
+          <span className="font-medium text-sm text-zinc-800 dark:text-zinc-100 truncate block">
+            {p.vendor_code ?? '—'}
+          </span>
+          <span className="font-mono text-[10px] text-zinc-400">{p.nm_id}</span>
+        </div>
       )
-    case 'vendor_code': return <>{p.vendor_code ?? '—'}</>
     case 'subject_name': return <>{p.subject_name ?? '—'}</>
     case 'group':
       return p.product_groups
@@ -551,6 +571,8 @@ function CellValue({ col, product: p }: { col: ColumnKey; product: CatalogProduc
         </span>
       )
     }
+    case 'volume_liters':
+      return <>{p.volume_liters != null ? `${Number(p.volume_liters).toFixed(3)} л` : '—'}</>
     case 'stock_cost_value': {
       const v = computedVal(p, 'stock_cost_value')
       return <>{v != null && v > 0 ? `${fmt(v)} ₽` : '—'}</>

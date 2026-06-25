@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 function daysAgo(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n)
@@ -23,8 +23,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ nm_id: string }> }
 ) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -282,8 +281,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ nm_id: string }> }
 ) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)

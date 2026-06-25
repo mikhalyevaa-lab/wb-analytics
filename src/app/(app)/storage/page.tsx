@@ -47,6 +47,10 @@ function toInputDate(d: Date) {
   return d.toISOString().split('T')[0]
 }
 
+function moscowToday() {
+  return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().split('T')[0]
+}
+
 function KpiCard({ icon, label, value, sub, color = '', hint }: {
   icon: string; label: string; value: string; sub?: string; color?: string; hint?: React.ReactNode
 }) {
@@ -84,9 +88,9 @@ function MiniBar({ data }: { data: DayRow[] }) {
 }
 
 export default function StoragePage() {
-  const today = toInputDate(new Date())
-  const [activeDays, setActiveDays]     = useState<number | null>(28)
-  const [customFrom, setCustomFrom]     = useState(toInputDate(new Date(Date.now() - 28 * 86400000)))
+  const today = moscowToday()
+  const [activeDays, setActiveDays]     = useState<number | null>(30)
+  const [customFrom, setCustomFrom]     = useState(toInputDate(new Date(Date.now() - 30 * 86400000)))
   const [customTo, setCustomTo]         = useState(today)
   const [customActive, setCustomActive] = useState(false)
 
@@ -112,7 +116,7 @@ export default function StoragePage() {
   useEffect(() => {
     setLoading(true)
     fetch(buildUrl())
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => {
         setKpi(d.kpi)
         setByDate(d.byDate ?? [])
@@ -121,12 +125,22 @@ export default function StoragePage() {
         setLastSyncAt(d.lastSyncAt ?? null)
         setDays(d.days ?? activeDays ?? 28)
       })
+      .catch(e => console.error('[storage] fetch error:', e))
       .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDays, customActive, customFrom, customTo])
 
   function selectPreset(d: number) {
-    setActiveDays(d === 0 ? 1 : d)
+    if (d === 0) {
+      // «Сегодня» — переключаемся в custom-режим с dateFrom=dateTo=сегодня по МСК
+      const todayMsk = moscowToday()
+      setCustomFrom(todayMsk)
+      setCustomTo(todayMsk)
+      setCustomActive(true)
+      setActiveDays(null)
+      return
+    }
+    setActiveDays(d)
     setCustomActive(false)
   }
 
@@ -165,16 +179,25 @@ export default function StoragePage() {
     <div className="p-6 space-y-4 max-w-[1100px]">
       {/* Шапка */}
       <div>
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Хранение WB</h1>
+          <Hint width={340}>
+            <strong>Блок Хранение WB</strong><br /><br />
+            <strong>Источник:</strong> отчёт о платном хранении WB (wb_storage_daily). WB списывает деньги за каждый товар, находящийся на складе.<br /><br />
+            <strong>Как обновить:</strong> Настройки → Синхронизация → Хранение WB. Или нажмите «Загрузить историю» для загрузки данных за 12 месяцев.<br /><br />
+            WB публикует данные о хранении с задержкой 1–2 дня.
+          </Hint>
           {lastDate && (() => {
             const dateStr = new Date(lastDate).toLocaleDateString('ru', { day: 'numeric', month: 'long' })
             const timeStr = lastSyncAt
               ? new Date(new Date(lastSyncAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(11, 16) + ' мск'
               : null
             return (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
                 данные по {dateStr}{timeStr ? `, ${timeStr}` : ''}
+                <Hint width={260}>
+                  Дата последней записи в базе данных хранения. Если дата устарела — запустите синхронизацию в Настройках.
+                </Hint>
               </span>
             )
           })()}
@@ -189,7 +212,9 @@ export default function StoragePage() {
             key={p.label}
             onClick={() => selectPreset(p.days)}
             className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-              !customActive && activeDays === (p.days === 0 ? 1 : p.days)
+              (p.days === 0
+                ? customActive && customFrom === today && customTo === today
+                : !customActive && activeDays === p.days)
                 ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-900'
                 : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
             }`}
@@ -227,12 +252,25 @@ export default function StoragePage() {
       ) : kpi && (
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">
-            <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium">Хранение за период</p>
+            <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium flex items-center gap-1">
+              Хранение за период
+              <Hint width={300}>
+                Суммарные расходы на хранение всех товаров за выбранный период.<br /><br />
+                WB рассчитывает стоимость хранения ежедневно: объём товара × тариф за литр. Тариф зависит от склада, категории и коэффициента хранения.<br /><br />
+                <strong>Среднее в день</strong> = общая сумма ÷ количество дней в периоде.
+              </Hint>
+            </p>
             <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mt-1">{fmt(kpi.total_cost)} ₽</p>
             <p className="text-xs text-zinc-400 mt-1">{fmt(kpi.avg_per_day)} ₽ / день в среднем</p>
           </div>
           <div className={`rounded-xl border p-4 ${kpi.wasteland_count > 0 ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/20' : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800'}`}>
-            <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium">Залежи</p>
+            <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium flex items-center gap-1">
+              Залежи
+              <Hint width={280}>
+                <strong>Залежи</strong> — товары, у которых есть остаток на складе WB, но не было ни одного заказа за выбранный период.<br /><br />
+                Такие товары занимают место и <strong>генерируют расходы на хранение</strong> без дохода. Рекомендуется снизить цену, запустить рекламу или вывезти товар со склада.
+              </Hint>
+            </p>
             <p className={`text-2xl font-bold mt-1 ${kpi.wasteland_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-zinc-100'}`}>
               {kpi.wasteland_count} арт.
             </p>
@@ -263,11 +301,42 @@ export default function StoragePage() {
               <tr>
                 <th className="text-left px-3 py-2 font-medium">Товар</th>
                 <th className="text-right px-3 py-2 font-medium">Остаток</th>
-                <th className="text-right px-3 py-2 font-medium">Хранение</th>
-                <th className="text-right px-3 py-2 font-medium">в день</th>
-                <th className="text-right px-3 py-2 font-medium">за единицу</th>
-                <th className="text-right px-3 py-2 font-medium">Выручка</th>
-                <th className="text-right px-3 py-2 font-medium">Хр/Выр %</th>
+                <th className="text-right px-3 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Хранение
+                    <Hint width={240}>Суммарные расходы на хранение этого товара за выбранный период.</Hint>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    в день
+                    <Hint width={240}>Среднесуточные расходы на хранение = Хранение за период ÷ количество дней.</Hint>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    за единицу
+                    <Hint width={260}>Расходы на хранение одной единицы товара за период = Хранение ÷ средний остаток.</Hint>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Выручка
+                    <Hint width={260}>Сумма выкупленных заказов (for_pay) по этому товару за период. Источник: wb_sales.</Hint>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Хр/Выр %
+                    <Hint width={280}>
+                      Доля расходов на хранение в выручке = Хранение ÷ Выручка × 100%.<br /><br />
+                      <span style={{color:'#16a34a'}}>■ Зелёный</span> — ≤ 10% (норма)<br />
+                      <span style={{color:'#ca8a04'}}>■ Жёлтый</span> — 10–20% (внимание)<br />
+                      <span style={{color:'#dc2626'}}>■ Красный</span> — &gt; 20% (хранение съедает выручку)<br /><br />
+                      «—» — нет выручки за период (залежь).
+                    </Hint>
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y">

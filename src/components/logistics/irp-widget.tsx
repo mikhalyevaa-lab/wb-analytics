@@ -91,7 +91,7 @@ export function IrpWidget({ rows, hasPendingInput }: Props) {
         <div className="flex items-end justify-between">
           <div>
             <p className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">
-              {latest?.irp != null ? latest.irp.toFixed(2) : '—'}
+              {latest?.irp != null ? latest.irp.toFixed(2) + '%' : '—'}
             </p>
             {irpDelta && (
               <p className={`text-sm mt-0.5 ${irpDelta.up ? 'text-emerald-500' : 'text-red-500'}`}>
@@ -122,7 +122,7 @@ export function IrpWidget({ rows, hasPendingInput }: Props) {
           <div>
             <p className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">
               {latest?.localization_index != null
-                ? latest.localization_index.toFixed(1) + '%'
+                ? latest.localization_index.toFixed(2)
                 : '—'}
             </p>
             {locDelta && (

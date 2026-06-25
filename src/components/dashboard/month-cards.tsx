@@ -1,4 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card'
+import { Hint } from '@/components/ui/hint'
 import type { MonthStats } from '@/lib/queries'
 
 function fmtNum(n: number) {
@@ -11,22 +12,28 @@ function fmtRub(n: number) {
   return n.toLocaleString('ru', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' ₽'
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: React.ReactNode }) {
   return (
     <Card>
       <CardContent className="p-5">
-        <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">{label}</p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">{label}</p>
+          {hint && <Hint width={280}>{hint}</Hint>}
+        </div>
         <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mt-1.5">{value}</p>
       </CardContent>
     </Card>
   )
 }
 
-function ForecastStat({ label, value, basis }: { label: string; value: string; basis: string }) {
+function ForecastStat({ label, value, basis, hint }: { label: string; value: string; basis: string; hint?: React.ReactNode }) {
   return (
     <Card className="border-dashed">
       <CardContent className="p-5">
-        <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">{label}</p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">{label}</p>
+          {hint && <Hint width={280}>{hint}</Hint>}
+        </div>
         <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mt-1.5">{value}</p>
         <p className="text-xs text-zinc-400 mt-1">{basis}</p>
       </CardContent>
@@ -45,29 +52,51 @@ export function MonthCards({ stats }: { stats: MonthStats }) {
     <div className="space-y-3">
       {/* Текущий месяц */}
       <div>
-        <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide mb-3">
-          Текущий месяц · {stats.periodLabel}
-        </h2>
+        <div className="flex items-center gap-1.5 mb-3">
+          <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+            Текущий месяц · {stats.periodLabel}
+          </h2>
+          <Hint width={300}>
+            Накопленные показатели с 1-го числа по сегодня. Заказы — из воронки продаж WB, реклама — из API рекламы.
+          </Hint>
+        </div>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <Stat label="Заказы, шт"     value={stats.orders.toLocaleString('ru')} />
-          <Stat label="Сумма заказов"  value={fmtRub(stats.revenue)} />
-          <Stat label="Реклама, руб"   value={fmtRub(stats.adSpend)} />
-          <Stat label="Цена заказа, руб" value={costPerOrder > 0 ? fmtRub(costPerOrder) : '—'} />
-          <Stat label="Переходов"      value={fmtNum(stats.clicks)} />
+          <Stat label="Заказы, шт" value={stats.orders.toLocaleString('ru')}
+            hint="Количество заказов с начала месяца по данным воронки продаж WB." />
+          <Stat label="Сумма заказов" value={fmtRub(stats.revenue)}
+            hint="Сумма цен заказанных товаров с начала месяца. Не равна выручке — часть заказов может быть отменена или не выкуплена." />
+          <Stat label="Реклама, руб" value={fmtRub(stats.adSpend)}
+            hint="Суммарные расходы на рекламу с начала месяца по данным API рекламы WB." />
+          <Stat label="Цена заказа, руб" value={costPerOrder > 0 ? fmtRub(costPerOrder) : '—'}
+            hint="Расходы на рекламу ÷ количество заказов. Показывает, сколько в среднем стоит привлечение одного заказа через рекламу." />
+          <Stat label="Переходов" value={fmtNum(stats.clicks)}
+            hint="Количество кликов по рекламным объявлениям с начала месяца." />
         </div>
       </div>
 
       {/* Прогноз */}
       <div>
-        <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide mb-3">
-          Прогноз на месяц · на {stats.daysInMonth} дней
-        </h2>
+        <div className="flex items-center gap-1.5 mb-3">
+          <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+            Прогноз на месяц · на {stats.daysInMonth} дней
+          </h2>
+          <Hint width={320}>
+            <strong>Формула прогноза</strong><br /><br />
+            Текущее значение × (дней в месяце ÷ прошедших дней)<br /><br />
+            Например: прошло {stats.daysElapsed} дней из {stats.daysInMonth} — все показатели масштабируются на коэффициент {stats.daysInMonth}/{stats.daysElapsed}. Прогноз линейный, не учитывает сезонность и выходные.
+          </Hint>
+        </div>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <ForecastStat label="Заказы, шт"     value={stats.forecastOrders.toLocaleString('ru')} basis={basis} />
-          <ForecastStat label="Сумма заказов"  value={fmtRub(stats.forecastRevenue)} basis={basis} />
-          <ForecastStat label="Реклама, руб"   value={fmtRub(stats.forecastAdSpend)} basis={basis} />
-          <ForecastStat label="Цена заказа, руб" value={forecastCostPerOrder > 0 ? fmtRub(forecastCostPerOrder) : '—'} basis={basis} />
-          <ForecastStat label="Переходов"      value={fmtNum(stats.forecastClicks)} basis={basis} />
+          <ForecastStat label="Заказы, шт" value={stats.forecastOrders.toLocaleString('ru')} basis={basis}
+            hint={`Прогноз = ${stats.orders.toLocaleString('ru')} заказов × (${stats.daysInMonth} ÷ ${stats.daysElapsed})`} />
+          <ForecastStat label="Сумма заказов" value={fmtRub(stats.forecastRevenue)} basis={basis}
+            hint="Прогнозируемая сумма заказов до конца месяца при текущем темпе." />
+          <ForecastStat label="Реклама, руб" value={fmtRub(stats.forecastAdSpend)} basis={basis}
+            hint="Прогнозируемые расходы на рекламу до конца месяца при текущем темпе." />
+          <ForecastStat label="Цена заказа, руб" value={forecastCostPerOrder > 0 ? fmtRub(forecastCostPerOrder) : '—'} basis={basis}
+            hint="Прогнозируемая стоимость одного заказа. Считается из прогнозных значений рекламы и заказов." />
+          <ForecastStat label="Переходов" value={fmtNum(stats.forecastClicks)} basis={basis}
+            hint="Прогнозируемое количество переходов по рекламе до конца месяца." />
         </div>
       </div>
     </div>

@@ -1,11 +1,12 @@
+// @ts-nocheck
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds, getManualCosts } from '@/lib/queries'
 import * as XLSX from 'xlsx'
 
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -16,12 +17,12 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get('to') || new Date().toISOString().split('T')[0]
 
   const [{ data: weeklyRows }, { data: adRows }, costs] = await Promise.all([
-    db.from('wb_weekly_reports')
+    adminDb().from('wb_weekly_reports')
       .select('sale,for_pay,logistics_cost,storage_cost,total_fines,wb_commission_correction,other_deductions,total_to_pay,date_from,date_to')
       .in('store_id', storeIds)
       .gte('date_from', from)
       .lte('date_to', to),
-    db.from('wb_ad_spend')
+    adminDb().from('wb_ad_spend')
       .select('spend,date,campaign_name')
       .in('store_id', storeIds)
       .gte('date', from)

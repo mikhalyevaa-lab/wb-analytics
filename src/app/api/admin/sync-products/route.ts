@@ -1,5 +1,5 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { adminDb } from '@/lib/admin'
 import { createWBClient } from '@/lib/wb-api'
 import { createClient } from '@supabase/supabase-js'
 
@@ -58,8 +58,8 @@ export async function POST(req: Request) {
           }
         })
 
-        const { error, count } = await db
-          .from('products')
+        const { error, count } = await adminDb()
+    .from('products')
           .upsert(rows, { onConflict: 'store_id,nm_id' })
         if (error) throw error
         total += count || rows.length

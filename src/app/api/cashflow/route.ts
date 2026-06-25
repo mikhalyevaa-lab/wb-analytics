@@ -1,18 +1,9 @@
+import { adminDb } from '@/lib/db-compat'
+import { requireAuth } from '@/lib/auth-server'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { createClient as createServerClient } from '@/lib/supabase-server'
-
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
 
 export async function POST(req: NextRequest) {
-  const db = await createServerClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
@@ -22,7 +13,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
   }
 
-  const { data: membership } = await db
+  const { data: membership } = await adminDb()
     .from('user_stores')
     .select('store_id')
     .eq('user_id', user.id)
@@ -31,7 +22,7 @@ export async function POST(req: NextRequest) {
 
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const admin = adminClient()
+  const admin = adminDb()
   const { data, error } = await admin
     .from('credit_schedule')
     .insert({ store_id, credit_name, payment_date, principal: principal || 0, interest: interest || 0, total_payment })
@@ -43,40 +34,38 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const db = await createServerClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id, is_paid } = await req.json()
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  const { data: row } = await db.from('credit_schedule').select('store_id').eq('id', id).single()
+  const { data: row } = await adminDb().from('credit_schedule').select('store_id').eq('id', id).single()
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const { data: membership } = await db
+  const { data: membership } = await adminDb()
     .from('user_stores').select('store_id').eq('user_id', user.id).eq('store_id', row.store_id).single()
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const admin = adminClient()
+  const admin = adminDb()
   const { error } = await admin.from('credit_schedule').update({ is_paid }).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }
 
 export async function DELETE(req: NextRequest) {
-  const db = await createServerClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await req.json()
-  const { data: row } = await db.from('credit_schedule').select('store_id').eq('id', id).single()
+  const { data: row } = await adminDb().from('credit_schedule').select('store_id').eq('id', id).single()
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const { data: membership } = await db
+  const { data: membership } = await adminDb()
     .from('user_stores').select('store_id').eq('user_id', user.id).eq('store_id', row.store_id).single()
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const admin = adminClient()
+  const admin = adminDb()
   const { error } = await admin.from('credit_schedule').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { WeeklyTable } from '@/components/weekly/weekly-table'
 import { Hint } from '@/components/ui/hint'
 import Link from 'next/link'
@@ -16,9 +16,12 @@ interface WeekRow {
   commission: number
   logistics: number
   storage: number
+  paid_storage: number
+  advertising: number
   penalties: number
   additional: number
   payout: number
+  reconciled: number
   delta: number | null
 }
 
@@ -229,7 +232,15 @@ function WeeklySection() {
     <section className="space-y-5">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Еженедельные отчёты</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Отчёты WB (Еженедельные)</h2>
+            <Hint width={360}>
+              <strong>Еженедельные отчёты о реализации</strong><br /><br />
+              WB формирует отчёт каждую неделю (обычно с пн по вс). В отчёте отражаются все операции: продажи, возвраты, логистика, хранение, штрафы.<br /><br />
+              <strong>Источник данных:</strong> таблица <code>wb_finance</code> — детализация строк из еженедельного отчёта WB (аналог Excel-выгрузки).<br /><br />
+              <strong>Данные ведём с 01.01.2026.</strong> Более ранние периоды не отображаются.
+            </Hint>
+          </div>
           <p className="text-sm text-zinc-400 mt-0.5">Реализационные отчёты WB по неделям</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -270,22 +281,39 @@ function WeeklySection() {
       {!loading && weeks.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">
-            <p className="text-xs text-zinc-500 uppercase tracking-wide">Всего выручка</p>
-            <p className="text-xl font-bold mt-1 text-zinc-900 dark:text-zinc-100">
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-xs text-zinc-500 uppercase tracking-wide">Всего выручка</p>
+              <Hint width={280}>
+                Сумма розничных продаж (ppvz_for_pay по строкам «Продажа») за все недели выбранного периода. Возвраты уже вычтены из расчёта выплаты, но здесь показана валовая выручка без вычетов.
+              </Hint>
+            </div>
+            <p className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
               {totalRevenue.toLocaleString('ru', { maximumFractionDigits: 0 })} ₽
             </p>
             <p className="text-xs text-zinc-400 mt-0.5">{weeks.length} недель</p>
           </div>
           <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">
-            <p className="text-xs text-zinc-500 uppercase tracking-wide">Всего выплата</p>
-            <p className={`text-xl font-bold mt-1 ${totalPayout >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-xs text-zinc-500 uppercase tracking-wide">Всего выплата</p>
+              <Hint width={300}>
+                Итоговая сумма к перечислению от WB за период.<br /><br />
+                <strong>Формула:</strong> Выручка − Возвраты − Логистика − Хранение − Штрафы ± Прочие.<br /><br />
+                Это то, что фактически поступает на расчётный счёт.
+              </Hint>
+            </div>
+            <p className={`text-xl font-bold ${totalPayout >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
               {totalPayout.toLocaleString('ru', { maximumFractionDigits: 0 })} ₽
             </p>
             <p className="text-xs text-zinc-400 mt-0.5">чистая от WB</p>
           </div>
           <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">
-            <p className="text-xs text-zinc-500 uppercase tracking-wide">Ср. выплата / нед</p>
-            <p className={`text-xl font-bold mt-1 ${avgPayout >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-xs text-zinc-500 uppercase tracking-wide">Ср. выплата / нед</p>
+              <Hint width={260}>
+                Среднее значение выплаты за одну неделю = Всего выплата ÷ количество недель в периоде. Помогает оценить стабильность денежного потока от WB.
+              </Hint>
+            </div>
+            <p className={`text-xl font-bold ${avgPayout >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
               {Math.round(avgPayout).toLocaleString('ru')} ₽
             </p>
             <p className="text-xs text-zinc-400 mt-0.5">среднее за период</p>
@@ -350,7 +378,16 @@ function FinanceSection() {
   return (
     <section className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Финансовые отчёты WB</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">Финансовые отчёты WB</h2>
+          <Hint width={360}>
+            <strong>Финансовые отчёты WB (сводные)</strong><br /><br />
+            Отчёты загружаются из WB API и хранятся в таблице <code>wb_weekly_reports</code>. Каждый отчёт — это сводка за одну неделю с итоговыми суммами по всем статьям.<br /><br />
+            <strong>Детализация:</strong> нажмите ▶ на строке, чтобы раскрыть все поля отчёта.<br /><br />
+            <strong>Сверка</strong> — автоматическая проверка совпадения данных WB с нашей базой. Кнопка «Сверить» появляется только если загружена детализация строк.<br /><br />
+            Данные ведём с 01.01.2026.
+          </Hint>
+        </div>
         <p className="text-sm text-muted-foreground mt-0.5">Еженедельные отчёты о реализации</p>
       </div>
 
@@ -373,12 +410,55 @@ function FinanceSection() {
                 <th className="text-left px-4 py-3 w-6"></th>
                 <th className="text-left px-3 py-3">№ отчёта</th>
                 <th className="text-left px-3 py-3">Период</th>
-                <th className="text-right px-3 py-3">Продажа</th>
-                <th className="text-right px-3 py-3">К перечислению</th>
-                <th className="text-right px-3 py-3">Хранение</th>
-                <th className="text-right px-3 py-3">Логистика</th>
-                <th className="text-right px-3 py-3">Итого к оплате</th>
-                <th className="text-left px-3 py-3">Статус</th>
+                <th className="text-right px-3 py-3">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    Продажа
+                    <span onClick={e => e.stopPropagation()}>
+                      <Hint width={260} align="right">Сумма выкупленных товаров по розничным ценам WB. Это валовая выручка до вычета комиссии и расходов.</Hint>
+                    </span>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-3">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    К перечислению
+                    <span onClick={e => e.stopPropagation()}>
+                      <Hint width={280} align="right">Сумма после вычета комиссии WB, но до вычета логистики и хранения.<br /><strong>= Продажа − Комиссия WB</strong></Hint>
+                    </span>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-3">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    Хранение
+                    <span onClick={e => e.stopPropagation()}>
+                      <Hint width={280} align="right">Стоимость хранения по данным еженедельного отчёта. Может отличаться от данных API paid_storage примерно в 1.3 раза из-за методологии расчёта WB.</Hint>
+                    </span>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-3">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    Логистика
+                    <span onClick={e => e.stopPropagation()}>
+                      <Hint width={260} align="right">Расходы на доставку товаров покупателям и обратную логистику (возвраты). Взимается WB автоматически.</Hint>
+                    </span>
+                  </span>
+                </th>
+                <th className="text-right px-3 py-3">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    Итого к оплате
+                    <span onClick={e => e.stopPropagation()}>
+                      <Hint width={300} align="right">Финальная сумма выплаты на расчётный счёт.<br /><strong>= К перечислению − Логистика − Хранение − Штрафы ± Прочие</strong></Hint>
+                    </span>
+                  </span>
+                </th>
+                <th className="text-left px-3 py-3">
+                  <span className="inline-flex items-center gap-1">
+                    Статус
+                    <Hint width={280}>
+                      <strong>Детализация загружена</strong> — строки отчёта загружены из WB API в таблицу wb_finance.<br /><br />
+                      <strong>Сверен</strong> — мы сравнили суммы из wb_finance с итогами отчёта и они совпали.
+                    </Hint>
+                  </span>
+                </th>
                 <th className="px-3 py-3"></th>
               </tr>
             </thead>
@@ -390,9 +470,8 @@ function FinanceSection() {
                 <tr><td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">Отчёты не найдены</td></tr>
               )}
               {reports.map(r => (
-                <>
+                <React.Fragment key={r.id}>
                   <tr
-                    key={r.id}
                     className="border-b border-border/30 hover:bg-muted/10 cursor-pointer"
                     onClick={() => toggleExpand(r.report_number)}
                   >
@@ -439,13 +518,13 @@ function FinanceSection() {
                     </td>
                   </tr>
                   {expanded === r.report_number && (
-                    <tr key={`${r.id}-detail`} className="border-b border-border/30 bg-muted/5">
+                    <tr className="border-b border-border/30 bg-muted/5">
                       <td colSpan={10} className="p-0">
                         <SummaryCard r={r} />
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
             </tbody>
           </table>

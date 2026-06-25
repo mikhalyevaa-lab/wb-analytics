@@ -11,6 +11,8 @@ interface StoreSettings {
   plan_orders_per_day?: number | null
   plan_revenue_per_day?: number | null
   min_margin_pct?: number | null
+  usn_tax_pct?: number | null
+  vat_pct?: number | null
 }
 
 function Field({ label, hint, name, value, onChange, suffix }: {
@@ -60,6 +62,8 @@ export function StoreSettingsForm() {
           plan_orders_per_day: d.plan_orders_per_day != null ? String(d.plan_orders_per_day) : '',
           plan_revenue_per_day: d.plan_revenue_per_day != null ? String(d.plan_revenue_per_day) : '',
           min_margin_pct: d.min_margin_pct != null ? String(d.min_margin_pct) : '',
+          usn_tax_pct: d.usn_tax_pct != null ? String(d.usn_tax_pct) : '',
+          vat_pct: d.vat_pct != null ? String(d.vat_pct) : '',
         })
       })
       .catch(() => {})
@@ -89,7 +93,12 @@ export function StoreSettingsForm() {
     } finally { setSaving(false) }
   }
 
-  const fields = [
+  const taxFields = [
+    { name: 'usn_tax_pct', label: 'Налог УСН', hint: 'Ставка упрощённой системы налогообложения', suffix: '%' },
+    { name: 'vat_pct', label: 'НДС', hint: 'Ставка налога на добавленную стоимость', suffix: '%' },
+  ]
+
+  const operFields = [
     { name: 'supply_days', label: 'Срок поставки', hint: 'Сколько дней от заказа до прихода на склад', suffix: 'дн' },
     { name: 'safety_stock_days', label: 'Страховой запас', hint: 'Минимальный буфер перед следующей поставкой', suffix: 'дн' },
     { name: 'plan_orders_per_day', label: 'План заказов / день', hint: 'Цель для дашборда', suffix: 'шт' },
@@ -100,22 +109,26 @@ export function StoreSettingsForm() {
     { name: 'control_window_days', label: 'Окно контроля', hint: 'Период для расчёта метрик рекламы', suffix: 'дн' },
   ]
 
+  function renderFields(fields: typeof operFields) {
+    return fields.map((f, i) => (
+      <div key={f.name} className={i > 0 ? 'pt-4' : ''}>
+        <Field label={f.label} hint={f.hint} name={f.name} value={values[f.name] ?? ''} onChange={set} suffix={f.suffix} />
+      </div>
+    ))
+  }
+
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5">
       <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-4">Параметры магазина</h2>
+
+      <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">Налоги</p>
+      <div className="space-y-4 divide-y divide-zinc-100 dark:divide-zinc-800 mb-6">
+        {renderFields(taxFields)}
+      </div>
+
+      <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">Операционные параметры</p>
       <div className="space-y-4 divide-y divide-zinc-100 dark:divide-zinc-800">
-        {fields.map((f, i) => (
-          <div key={f.name} className={i > 0 ? 'pt-4' : ''}>
-            <Field
-              label={f.label}
-              hint={f.hint}
-              name={f.name}
-              value={values[f.name] ?? ''}
-              onChange={set}
-              suffix={f.suffix}
-            />
-          </div>
-        ))}
+        {renderFields(operFields)}
       </div>
 
       {error && <p className="mt-4 text-sm text-red-500">{error}</p>}

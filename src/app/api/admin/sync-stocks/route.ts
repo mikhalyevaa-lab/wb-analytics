@@ -1,5 +1,5 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { adminDb } from '@/lib/admin'
 import { createWBClient } from '@/lib/wb-api'
 import { createClient } from '@supabase/supabase-js'
 
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       if (!stocks?.length) { results[store.name] = { count: 0 }; continue }
 
       // Удаляем сегодняшний снапшот и пишем свежий
-      await db.from('wb_stocks').delete().eq('store_id', store.id).eq('date', today)
+      await adminDb().from('wb_stocks').delete().eq('store_id', store.id).eq('date', today)
 
       const rows = stocks.map(s => ({
         store_id:               store.id,
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 
       let total = 0
       for (let i = 0; i < rows.length; i += 500) {
-        const { error, count } = await db.from('wb_stocks').insert(rows.slice(i, i + 500))
+        const { error, count } = await adminDb().from('wb_stocks').insert(rows.slice(i, i + 500))
         if (error) throw error
         total += count || 500
       }

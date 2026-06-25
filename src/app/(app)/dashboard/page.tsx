@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase-server'
-import { getDailySales, getTodayStats, getMonthStats, getUserStoreIds } from '@/lib/queries'
+import { getServerSession } from '@/lib/auth-server'
+import { getDailySales, getMonthStats, getUserStoreIds } from '@/lib/queries'
+import { Hint } from '@/components/ui/hint'
 import { TodayCards } from '@/components/dashboard/today-cards'
 import { MonthCards } from '@/components/dashboard/month-cards'
 import { SalesChart } from '@/components/dashboard/sales-chart'
@@ -9,9 +10,9 @@ import { TopProducts } from '@/components/dashboard/top-products'
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   const storeIds = await getUserStoreIds(user.id)
 
@@ -23,17 +24,19 @@ export default async function DashboardPage() {
         </div>
         <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">Магазин не подключён</h2>
         <p className="text-sm text-zinc-500 mt-2 max-w-xs">
-          Запустите seed_store.sql в Supabase и добавьте ваш аккаунт в таблицу user_stores
+          Добавьте WB API токен в настройках, чтобы начать синхронизацию данных
         </p>
-        <code className="mt-4 text-xs bg-zinc-100 dark:bg-zinc-800 px-3 py-2 rounded-lg text-zinc-600 dark:text-zinc-400">
-          INSERT INTO user_stores (user_id, store_id) VALUES (auth.uid(), &#39;&lt;store_id&gt;&#39;)
-        </code>
+        <a
+          href="/settings"
+          className="mt-4 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm rounded-lg hover:opacity-80 transition-opacity"
+        >
+          Перейти в Настройки
+        </a>
       </div>
     )
   }
 
-  const [today, month, dailySales] = await Promise.all([
-    getTodayStats(storeIds),
+  const [month, dailySales] = await Promise.all([
     getMonthStats(storeIds),
     getDailySales(storeIds),
   ])
@@ -49,12 +52,21 @@ export default async function DashboardPage() {
     <div className="p-6 space-y-6 max-w-[1400px]">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Дашборд</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Дашборд</h1>
+            <Hint width={340}>
+              <strong>Источники данных дашборда</strong><br /><br />
+              <strong>Заказы / Сумма</strong> — воронка продаж WB (wb_funnel). Обновляется вручную или по расписанию.<br /><br />
+              <strong>Выручка</strong> — wb_sales, только выкупленные позиции (for_pay &gt; 0).<br /><br />
+              <strong>Реклама / Переходы</strong> — API рекламы WB (wb_ad_spend). WB хранит данные за последние 90 дней.<br /><br />
+              <strong>Прогноз</strong> — линейная экстраполяция текущего темпа на весь месяц.
+            </Hint>
+          </div>
           <p className="text-sm text-zinc-400 mt-0.5">Обновлено: {now}</p>
         </div>
       </div>
 
-      <TodayCards stats={today} />
+      <TodayCards />
 
       <MonthCards stats={month} />
 

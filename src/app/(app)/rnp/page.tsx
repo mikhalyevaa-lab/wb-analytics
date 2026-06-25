@@ -1,13 +1,13 @@
 export const dynamic = 'force-dynamic'
 
-import { createClient } from '@/lib/supabase-server'
+import { getServerSession } from '@/lib/auth-server'
 import { redirect } from 'next/navigation'
 import { RnpMatrix } from '@/components/rnp/rnp-matrix'
 
 export default async function RnpPage() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   return (
     <div className="p-6 space-y-6">

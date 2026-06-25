@@ -1,6 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 export const dynamic = 'force-dynamic'
 
-import { createClient } from '@/lib/supabase-server'
+import { getServerSession } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 import { redirect } from 'next/navigation'
 import {
@@ -11,7 +12,6 @@ import {
   getDataQualityAlerts,
   getOverviewDailySales,
 } from '@/lib/queries-overview'
-import { adminDb } from '@/lib/admin'
 import { SignalCards } from '@/components/overview/signal-cards'
 import { KpiCards } from '@/components/overview/kpi-cards'
 import { InsightsRow } from '@/components/overview/insights-row'
@@ -37,9 +37,9 @@ export default async function OverviewPage({ searchParams }: PageProps) {
   const dateFrom = sp.from ?? startOfYear()
   const dateTo = sp.to ?? today()
 
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession()
+  if (!session?.user) redirect('/login')
+  const user = session.user
 
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) redirect('/settings')

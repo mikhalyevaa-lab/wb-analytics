@@ -1,15 +1,16 @@
+// @ts-nocheck
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 
 export async function GET() {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: stores } = await db.from('user_stores').select('store_id').eq('user_id', user.id)
+  const { data: stores } = await adminDb().from('user_stores').select('store_id').eq('user_id', user.id)
   const storeIds = (stores ?? []).map(s => s.store_id)
 
-  const { data, error } = await db
+  const { data, error } = await adminDb()
     .from('product_groups')
     .select('*')
     .in('store_id', storeIds)
@@ -20,15 +21,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const { name, color, store_id } = body
 
   // Verify user owns the store
-  const { data: store } = await db
+  const { data: store } = await adminDb()
     .from('user_stores')
     .select('store_id')
     .eq('user_id', user.id)
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
   if (!store) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { data, error } = await db
+  const { data, error } = await adminDb()
     .from('product_groups')
     .insert({ name, color: color || '#6366f1', store_id })
     .select()

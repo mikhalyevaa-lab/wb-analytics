@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,8 +22,7 @@ async function fetchAllRows<T>(
 }
 
 export async function GET(req: Request) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -51,16 +50,16 @@ export async function GET(req: Request) {
     .in('store_id', storeIds)
     .order('created_at', { ascending: false })
     .limit(1)
-    .single()
+    .maybeSingle()
   const lastDate: string | null   = (lastRow as { date?: string; created_at?: string } | null)?.date ?? null
   const lastSyncAt: string | null = (lastRow as { date?: string; created_at?: string } | null)?.created_at ?? null
 
   // Все строки за период с пагинацией
-  type RawRow = { date: string; nm_id: number | null; vendor_code: string | null; subject: string | null; brand: string | null; cost: number | null; volume: number | null }
+  type RawRow = { date: string; nm_id: number | null; vendor_code: string | null; subject: string | null; brand: string | null; warehouse: string | null; cost: number | null; volume: number | null }
 
   const allRows = await fetchAllRows<RawRow>(from =>
     (adb.from('wb_storage_daily') as any)
-      .select('date, nm_id, vendor_code, subject, brand, cost, volume')
+      .select('date, nm_id, vendor_code, subject, brand, warehouse, cost, volume')
       .in('store_id', storeIds)
       .gte('date', dateFrom)
       .lte('date', dateTo)
@@ -72,48 +71,59 @@ export async function GET(req: Request) {
   const dayMap = new Map<string, number>()
   for (const r of allRows) {
     if (!r.date) continue
-    dayMap.set(r.date, (dayMap.get(r.date) ?? 0) + (r.cost ?? 0))
+    const d = typeof r.date === 'string' ? r.date.slice(0, 10) : (r.date as Date).toISOString().slice(0, 10)
+    dayMap.set(d, (dayMap.get(d) ?? 0) + (r.cost ?? 0))
   }
   const byDate = Array.from(dayMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
     .map(([date, cost]) => ({ date, cost: Math.round(cost * 100) / 100 }))
 
   // Реальное кол-во дней с данными (для среднего)
   const actualDays = dayMap.size
 
-  // Агрегат по nm_id
+  // Агрегат по nm_id + разбивка по складам
   const skuMap = new Map<number, {
     nm_id: number; vendor_code: string | null; subject: string | null; brand: string | null
     cost_total: number; volume_avg: number; date_count: number
+    warehouseMap: Map<string, number>
   }>()
   for (const r of allRows) {
     if (!r.nm_id) continue
     const cur = skuMap.get(r.nm_id)
+    const cost = r.cost ?? 0
+    const wh = r.warehouse ?? 'Неизвестно'
     if (cur) {
-      cur.cost_total  += r.cost ?? 0
+      cur.cost_total  += cost
       cur.volume_avg  += r.volume ?? 0
       cur.date_count  += 1
+      cur.warehouseMap.set(wh, (cur.warehouseMap.get(wh) ?? 0) + cost)
     } else {
+      const warehouseMap = new Map<string, number>()
+      warehouseMap.set(wh, cost)
       skuMap.set(r.nm_id, {
         nm_id:       r.nm_id,
         vendor_code: r.vendor_code,
         subject:     r.subject,
         brand:       r.brand,
-        cost_total:  r.cost ?? 0,
+        cost_total:  cost,
         volume_avg:  r.volume ?? 0,
         date_count:  1,
+        warehouseMap,
       })
     }
   }
 
   // Выручка из заказов за период
+  // wb_orders.date — timestamptz, поэтому lte('date', '2026-06-17') = date <= полночь UTC.
+  // Добавляем 'T23:59:59Z' чтобы захватить весь день.
+  const ordersDateTo = `${dateTo}T23:59:59Z`
   type OrderRow = { nm_id: number | null; price_after_spp: number | null; price_after_discount: number | null; total_price: number | null; discount_percent: number | null }
   const ordersRaw = await fetchAllRows<OrderRow>(from =>
     (adb.from('wb_orders') as any)
       .select('nm_id, price_after_spp, price_after_discount, total_price, discount_percent')
       .in('store_id', storeIds)
       .gte('date', dateFrom)
-      .lte('date', dateTo)
+      .lte('date', ordersDateTo)
       .eq('is_cancel', false)
       .range(from, from + 4999)
   )
@@ -161,6 +171,9 @@ export async function GET(req: Request) {
       revenue,
       storage_to_revenue: storageToRevenue != null ? Math.round(storageToRevenue * 10000) / 100 : null,
       is_wasteland:       isWasteland,
+      warehouses: Array.from(s.warehouseMap.entries())
+        .map(([warehouse, cost]) => ({ warehouse, cost: Math.round(cost * 100) / 100 }))
+        .sort((a, b) => b.cost - a.cost),
     }
   }).sort((a, b) => b.cost_total - a.cost_total)
 

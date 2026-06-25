@@ -1,5 +1,5 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
-import { adminDb } from '@/lib/admin'
 import { createWBClient } from '@/lib/wb-api'
 
 export const dynamic = 'force-dynamic'

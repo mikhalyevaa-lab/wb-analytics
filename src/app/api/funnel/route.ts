@@ -1,7 +1,7 @@
+import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase-server'
+import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
-import { adminDb } from '@/lib/admin'
 
 function daysAgo(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]
@@ -17,8 +17,7 @@ function isoWeek(dateStr: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  const db = await createClient()
-  const { data: { user } } = await db.auth.getUser()
+  const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const storeIds = await getUserStoreIds(user.id)
@@ -143,10 +142,11 @@ export async function GET(req: NextRequest) {
 
   // Fetch product info for nm_ids
   const nmIds = [...nmMap.keys()]
+  type ProductRow = { nm_id: number; vendor_code: string | null; title: string | null; photo_url: string | null }
   const { data: products } = nmIds.length
     ? await adminDb().from('products').select('nm_id, vendor_code, title, photo_url').in('nm_id', nmIds)
-    : { data: [] }
-  const productMap = new Map((products ?? []).map((p: { nm_id: number; vendor_code: string | null; title: string | null; photo_url: string | null }) => [p.nm_id, p]))
+    : { data: [] as ProductRow[] }
+  const productMap = new Map<number, ProductRow>((products ?? []).map((p: ProductRow) => [p.nm_id, p]))
 
   const byNm = [...nmMap.values()]
     .map(nm => {

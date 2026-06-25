@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Hint } from '@/components/ui/hint'
 
 interface Campaign {
   campaign_id: number
@@ -32,8 +33,9 @@ interface NmRow {
   orders_sum: number
 }
 
-function fmt(n: number, dec = 0) {
-  return n.toLocaleString('ru-RU', { minimumFractionDigits: dec, maximumFractionDigits: dec })
+function fmt(n: number | null | undefined, dec = 0) {
+  if (n == null) return '—'
+  return Number(n).toLocaleString('ru-RU', { minimumFractionDigits: dec, maximumFractionDigits: dec })
 }
 
 function isNameless(c: Campaign) {
@@ -285,13 +287,16 @@ export function CampaignsTable() {
   const namelessCount = campaigns.filter(isNameless).length
 
   const thBase = 'sticky top-0 z-10 bg-muted border-b border-border'
-  const th = (label: string, key: SortKey, cls = '') => (
+  const th = (label: string, key: SortKey, cls = '', hint?: string) => (
     <th
       key={key}
       className={`${thBase} px-3 py-2.5 text-left text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap ${cls}`}
       onClick={() => handleSort(key)}
     >
-      {label}{sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+      <span className="inline-flex items-center gap-1">
+        {label}{sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+        {hint && <span onClick={e => e.stopPropagation()}><Hint width={240}>{hint}</Hint></span>}
+      </span>
     </th>
   )
 
@@ -312,8 +317,16 @@ export function CampaignsTable() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-baseline gap-3">
-        <h2 className="text-base font-semibold">Анализ РК</h2>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-base font-semibold">Анализ РК</h2>
+          <Hint width={320}>
+            <strong>Анализ рекламных кампаний</strong><br /><br />
+            Каждая строка — одна рекламная кампания. Нажмите ▶ чтобы раскрыть детализацию по артикулам внутри кампании.<br /><br />
+            Название кампании можно задать вручную — кликните на «Без названия». Или загрузить CSV-шаблон кнопкой ↓ CSV.<br /><br />
+            Данные фильтруются по выбранному периоду (пресеты или ручные даты).
+          </Hint>
+        </div>
         {syncLabel && (
           <span className="text-xs text-muted-foreground">данные по {syncLabel}</span>
         )}
@@ -363,15 +376,15 @@ export function CampaignsTable() {
                 <span className="text-[10px] font-normal text-zinc-400 ml-1">(кликните для редактирования)</span>
               </th>
               {th('ID РК', 'campaign_id', 'w-28')}
-              {th('Сумма ₽', 'spend', 'text-right w-28')}
-              {th('Показы', 'views', 'text-right w-28')}
-              {th('CPM ₽', 'cpm', 'text-right w-24')}
-              {th('Клики', 'clicks', 'text-right w-24')}
-              {th('CPC ₽', 'cpc', 'text-right w-24')}
-              {th('CTR %', 'ctr', 'text-right w-20')}
-              {th('Заказы шт', 'orders_count', 'text-right w-24')}
-              {th('Заказы ₽', 'orders_sum', 'text-right w-28')}
-              {th('ДРР %', 'drr', 'text-right w-20')}
+              {th('Сумма ₽', 'spend', 'text-right w-28', 'Суммарные расходы на кампанию за период.')}
+              {th('Показы', 'views', 'text-right w-28', 'Количество показов рекламного объявления покупателям.')}
+              {th('CPM ₽', 'cpm', 'text-right w-24', 'Стоимость 1 000 показов. CPM = Расходы ÷ Показы × 1 000. Зелёный < 100, жёлтый < 200.')}
+              {th('Клики', 'clicks', 'text-right w-24', 'Количество кликов по объявлению.')}
+              {th('CPC ₽', 'cpc', 'text-right w-24', 'Цена клика. CPC = Расходы ÷ Клики. Зелёный < 5 ₽, жёлтый < 10 ₽, красный ≥ 10 ₽.')}
+              {th('CTR %', 'ctr', 'text-right w-20', 'Кликабельность. CTR = Клики ÷ Показы × 100%. Зелёный ≥ 4%, жёлтый ≥ 2%, красный < 2%.')}
+              {th('Заказы шт', 'orders_count', 'text-right w-24', 'Количество заказов, атрибутированных рекламной кампанией.')}
+              {th('Заказы ₽', 'orders_sum', 'text-right w-28', 'Сумма заказов по рекламной кампании.')}
+              {th('ДРР %', 'drr', 'text-right w-20', 'Доля рекламных расходов. ДРР = Расходы ÷ Заказы ₽ × 100%. Зелёный ≤ 15%, жёлтый ≤ 25%, красный > 25%.')}
             </tr>
           </thead>
           <tbody>
@@ -403,8 +416,8 @@ export function CampaignsTable() {
               const isNmLoading = nmLoading.has(c.campaign_id)
               const nms = nmCache.get(c.campaign_id) ?? []
               return (
-                <>
-                  <tr key={c.campaign_id} className="border-b border-border hover:bg-muted/20 transition-colors text-xs">
+                <React.Fragment key={c.campaign_id}>
+                  <tr className="border-b border-border hover:bg-muted/20 transition-colors text-xs">
                     <td className="px-2 py-2.5 text-center">
                       <button
                         onClick={() => toggleExpand(c.campaign_id)}
@@ -469,7 +482,7 @@ export function CampaignsTable() {
                       </tr>
                     ))
                   )}
-                </>
+                </React.Fragment>
               )
             })}
           </tbody>
