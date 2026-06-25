@@ -21,6 +21,7 @@ export interface WBOrder {
   discountPercent: number
   warehouseName: string
   oblast: string
+  oblastOkrugName: string
   incomeID: number
   odid: number
   nmId: number
@@ -381,18 +382,23 @@ function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
 class WBApiClient {
   private apiKey: string
+  private analyticsKey: string
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, analyticsKey?: string) {
     this.apiKey = apiKey
+    this.analyticsKey = analyticsKey ?? apiKey
   }
 
   private async fetch<T>(url: string, options?: RequestInit): Promise<T> {
+    // Аналитический API (seller-analytics-api) требует отдельный токен
+    const isAnalyticsUrl = url.includes('seller-analytics-api.wildberries.ru')
+    const token = isAnalyticsUrl ? this.analyticsKey : this.apiKey
     let attempt = 0
     while (true) {
       const response = await fetch(url, {
         ...options,
         headers: {
-          'Authorization': this.apiKey,
+          'Authorization': token,
           'Content-Type': 'application/json',
           ...options?.headers,
         },
@@ -694,8 +700,8 @@ class WBApiClient {
 /**
  * Создать клиент WB API для конкретного магазина
  */
-export function createWBClient(apiKey: string): WBApiClient {
-  return new WBApiClient(apiKey)
+export function createWBClient(apiKey: string, analyticsKey?: string): WBApiClient {
+  return new WBApiClient(apiKey, analyticsKey)
 }
 
 /**

@@ -8,19 +8,14 @@
  * Retry-логика встроена в WBApiClient.fetch (до 4 попыток, exponential backoff).
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from './db-compat'
 import { createWBClient, formatDateForWB, daysAgo, parseWBNum } from './wb-api'
 import { recalcProductAggregates } from './sync-initial'
 import type { WBFunnelItem } from './wb-api'
 
-// Административный клиент с service_role — обходит RLS, используется только в cron/API
-function createAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
-}
-
-type SupabaseAdminClient = ReturnType<typeof createAdminClient>
+function adminClient() { return createAdminClient() }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseAdminClient = any
 
 // ---------- Типы ----------
 
@@ -748,7 +743,7 @@ export async function syncOrdersPeriod(
     .single()
   if (!storeRow) throw new Error('store not found')
 
-  const wb = createWBClient(storeRow.wb_token)
+  const wb = createWBClient((storeRow as any).wb_token)
   // flag=1: все заказы, дата создания >= dateFrom
   const dateFromFormatted = formatDateForWB(new Date(dateFrom + 'T00:00:00'))
   const orders = await wb.getOrders(dateFromFormatted, 1)
@@ -793,7 +788,7 @@ const FUNNEL_BATCH = 20 // лимит API — 20 nm_id за запрос
 /** Возвращает все nm_id для магазина из таблицы products */
 async function getStoreNmIds(storeId: string, db: SupabaseAdminClient): Promise<number[]> {
   const { data } = await db.from('products').select('nm_id').eq('store_id', storeId)
-  return (data ?? []).map(r => r.nm_id as number).filter(Boolean)
+  return (data ?? []).map((r: any) => Number(r.nm_id)).filter(Boolean)
 }
 
 /** Записывает строки воронки в Supabase (upsert по store_id+date+nm_id) */
@@ -807,7 +802,6 @@ async function upsertFunnelRows(
       store_id:                storeId,
       date:                    day.date.substring(0, 10),
       nm_id:                   item.product.nmId,
-      supplier_article:        item.product.vendorCode ?? null,
       open_count:              day.openCount ?? 0,
       cart_count:              day.cartCount ?? 0,
       order_count:             day.orderCount ?? 0,
@@ -860,7 +854,7 @@ async function syncFunnel(
     for (const dateStr of [yesterday, dayBefore]) {
       let items: WBFunnelItem[] = []
       for (let i = 0; i < nmIds.length; i += FUNNEL_BATCH) {
-        if (i > 0) await sleep(21000)
+        if (i > 0) await sleep(3000)
         const batch = nmIds.slice(i, i + FUNNEL_BATCH)
         try {
           const chunk = await wb.getFunnelHistory(batch, dateStr, dateStr)
@@ -899,7 +893,7 @@ export async function syncFunnelPeriod(
     .single()
   if (!storeRow) throw new Error('store not found')
 
-  const analyticsToken = storeRow.wb_analytics_token || storeRow.wb_token
+  const analyticsToken = (storeRow as any).wb_analytics_token || (storeRow as any).wb_token
   const wb = createWBClient(analyticsToken)
   const nmIds = await getStoreNmIds(storeId, db)
   if (!nmIds.length) return { count: 0, days: 0 }
@@ -920,7 +914,7 @@ export async function syncFunnelPeriod(
     let items: WBFunnelItem[] = []
 
     for (let i = 0; i < nmIds.length; i += FUNNEL_BATCH) {
-      if (i > 0) await sleep(21000)
+      if (i > 0) await sleep(3000)
       const batch = nmIds.slice(i, i + FUNNEL_BATCH)
       try {
         const chunk = await wb.getFunnelHistory(batch, s, e)
@@ -1050,7 +1044,7 @@ export async function syncPaidStoragePeriod(
     .single()
   if (!storeRow?.wb_analytics_token) throw new Error('no wb_analytics_token')
 
-  const wb = createWBClient(storeRow.wb_analytics_token)
+  const wb = createWBClient((storeRow as any).wb_analytics_token)
 
   // Разбиваем период на 31-дневные чанки
   const periodChunks: Array<{ from: string; to: string }> = []
@@ -1147,7 +1141,7 @@ export async function syncAdvertPeriod(
   const { data: storeRow } = await db.from('stores').select('id, name, wb_token').eq('id', storeId).single()
   if (!storeRow?.wb_token) throw new Error('Store not found or no token')
 
-  const wb = createWBClient(storeRow.wb_token)
+  const wb = createWBClient((storeRow as any).wb_token)
 
   // Получаем все кампании (включая завершённые — нужны для истории)
   const allCampaigns = await wb.getAdCampaigns()
@@ -1189,10 +1183,13 @@ export async function syncAdvertPeriod(
         continue
       }
 
+      const nmRows: Record<string, unknown>[] = []
+
       for (const camp of stats ?? []) {
         for (const day of camp.days ?? []) {
           const date = day.date?.split('T')[0]
           if (!date) continue
+
           const { error } = await db.from('wb_ad_spend').upsert({
             store_id:      storeId,
             campaign_id:   camp.advertId,
@@ -1206,7 +1203,38 @@ export async function syncAdvertPeriod(
           }, { onConflict: 'store_id,campaign_id,date' })
           if (error) { errors++; console.error('[advert-period] upsert:', error.message) }
           else inserted++
+
+          // Детализация по артикулам (apps → nms)
+          const nmAgg = new Map<number, { nm_name: string | null; spend: number; views: number; clicks: number; orders_count: number; orders_sum: number }>()
+          for (const app of day.apps ?? []) {
+            for (const nm of app.nms ?? []) {
+              if (!nm.nmId) continue
+              const cur = nmAgg.get(nm.nmId) ?? { nm_name: nm.name ?? null, spend: 0, views: 0, clicks: 0, orders_count: 0, orders_sum: 0 }
+              cur.spend        += nm.sum       ?? 0
+              cur.views        += nm.views     ?? 0
+              cur.clicks       += nm.clicks    ?? 0
+              cur.orders_count += nm.orders    ?? 0
+              cur.orders_sum   += nm.sum_price ?? 0
+              nmAgg.set(nm.nmId, cur)
+            }
+          }
+          for (const [nmId, agg] of nmAgg) {
+            nmRows.push({
+              store_id: storeId, campaign_id: camp.advertId, nm_id: nmId,
+              nm_name: agg.nm_name, date,
+              spend: agg.spend, views: agg.views, clicks: agg.clicks,
+              orders_count: agg.orders_count, orders_sum: agg.orders_sum,
+            })
+          }
         }
+      }
+
+      // Пакетный upsert nm-строк
+      for (let j = 0; j < nmRows.length; j += 500) {
+        const { error } = await db.from('wb_ad_spend_nm').upsert(nmRows.slice(j, j + 500), {
+          onConflict: 'store_id,campaign_id,nm_id,date', ignoreDuplicates: false,
+        })
+        if (error) console.error('[advert-period] nm upsert:', error.message)
       }
     }
   }

@@ -17,20 +17,14 @@
  * 65 секунд между вызовами Statistics API методов.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { adminDb } from './db-compat'
 import { createWBClient, formatDateForWB } from './wb-api'
 
 const STATS_RATE_LIMIT_MS = 65_000   // 65с между методами Stats API
 const CONTENT_RATE_LIMIT_MS = 700    // 700мс между страницами Content API
 const MAX_HISTORY_DAYS = 180         // WB Statistics API возвращает данные максимум за ~180 дней
 
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+function adminClient() { return adminDb() }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
 
@@ -66,7 +60,7 @@ async function logSync(
     date_from: dateFrom,
     date_to: dateTo,
     rows_count: rowsCount,
-    status: error ? 'error' : 'done',
+    status: error ? 'error' : 'ok',
     error: error || null,
     duration_ms: durationMs,
   })
@@ -105,6 +99,8 @@ async function initialOrders(store: { id: string; wb_token: string }, log: (m: s
         discount_percent: o.discountPercent,
         is_cancel: o.isCancel,
         cancel_dt: o.cancel_dt || null,
+        oblast_okrug_name: o.oblastOkrugName ?? null,
+        warehouse_name: o.warehouseName ?? null,
       }))
       for (const chunk of chunkArray(rows, 500)) {
         await db.from('wb_orders').upsert(chunk, { onConflict: 'store_id,g_number,nm_id,barcode,date', ignoreDuplicates: true })
@@ -294,17 +290,21 @@ async function initialStocks(store: { id: string; wb_token: string }, log: (m: s
   log('stocks: загрузка текущих остатков…')
   try {
     await db.from('wb_stocks').delete().eq('store_id', store.id).eq('date', today)
-    const stocks = await wb.getStocks(yesterday)
+    // dateFrom='2019-01-01' — получаем ВСЕ остатки, а не только изменившиеся вчера
+    const stocks = await wb.getStocks('2019-01-01')
     if (stocks?.length) {
       const rows = stocks.map(s => ({
         store_id: store.id, date: today,
-        last_change_date: s.lastChangeDate, supplier_article: s.supplierArticle,
-        tech_size: s.techSize, barcode: s.barcode, quantity: s.quantity,
-        quantity_full: s.quantityFull, quantity_not_in_orders: s.quantityNotInOrders,
-        warehouse: s.warehouseName, nm_id: s.nmId, subject: s.subject,
-        category: s.category, brand: s.brand, price: s.Price, discount: s.Discount,
+        last_change_date: s.lastChangeDate ?? null, supplier_article: s.supplierArticle ?? null,
+        tech_size: s.techSize ?? null, barcode: s.barcode ?? null, quantity: s.quantity ?? 0,
+        quantity_full: s.quantityFull ?? 0, quantity_not_in_orders: s.quantityNotInOrders ?? 0,
+        warehouse: s.warehouseName ?? null, nm_id: s.nmId ?? null, subject: s.subject ?? null,
+        category: s.category ?? null, brand: s.brand ?? null, price: s.Price ?? null, discount: s.Discount ?? null,
       }))
-      for (const chunk of chunkArray(rows, 500)) await db.from('wb_stocks').insert(chunk)
+      for (const chunk of chunkArray(rows, 500)) {
+        const { error } = await db.from('wb_stocks').insert(chunk)
+        if (error) throw new Error(`wb_stocks insert: ${error.message}`)
+      }
       await logSync(db, store.id, 'stocks', yesterday, today, rows.length, Date.now() - t0)
       log(`stocks: ✓ ${rows.length} позиций`)
     }
@@ -343,7 +343,8 @@ async function initialProducts(store: { id: string; wb_token: string }, log: (m:
         }
       })
       for (const chunk of chunkArray(rows, 100)) {
-        await db.from('products').upsert(chunk, { onConflict: 'store_id,nm_id' })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await db.from('products').upsert(chunk as any, { onConflict: 'store_id,nm_id' })
       }
       total += rows.length
       log(`products: стр.${page} ✓ ${rows.length} карточек (итого ${total})`)
@@ -360,6 +361,9 @@ async function initialProducts(store: { id: string; wb_token: string }, log: (m:
   log('products: пересчёт агрегатов…')
   await recalcProductAggregates(store.id, db, log)
   log(`products: ✓ всего ${total} карточек`)
+
+  const today = dateStr(new Date())
+  await logSync(db, store.id, 'products', today, today, total, 0)
 }
 
 // ─────────────────────────────────────────────
@@ -397,9 +401,10 @@ export async function recalcProductAggregates(
   if (!products?.length) return
 
   // Paginate wb_stocks (Supabase hard cap = 1000 rows per request)
-  const stocks: { nm_id: number | null; quantity: number | null }[] = []
+  // quantity_full = общий остаток включая зарезервированные в заказах
+  const stocks: { nm_id: number | null; quantity: number | null; quantity_full: number | null }[] = []
   for (let page = 0; ; page++) {
-    const { data: chunk } = await db.from('wb_stocks').select('nm_id, quantity')
+    const { data: chunk } = await db.from('wb_stocks').select('nm_id, quantity, quantity_full')
       .eq('store_id', storeId).eq('date', latestStockDate).range(page * 1000, (page + 1) * 1000 - 1)
     if (!chunk?.length) break
     stocks.push(...chunk)
@@ -428,11 +433,11 @@ export async function recalcProductAggregates(
   for (const o of orders30 ?? []) if (o.nm_id) ord30Map[o.nm_id] = (ord30Map[o.nm_id] ?? 0) + 1
   for (const s of sales30 ?? []) if (s.nm_id) sal30Map[s.nm_id] = (sal30Map[s.nm_id] ?? 0) + 1
   for (const o of orders7 ?? []) if (o.nm_id) ord7Map[o.nm_id] = (ord7Map[o.nm_id] ?? 0) + 1
-  for (const s of stocks) if (s.nm_id) stockMap[s.nm_id] = (stockMap[s.nm_id] ?? 0) + (s.quantity ?? 0)
+  for (const s of stocks) if (s.nm_id) stockMap[s.nm_id] = (stockMap[s.nm_id] ?? 0) + (s.quantity_full ?? s.quantity ?? 0)
 
   const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
 
-  const updates = (products ?? []).map(p => {
+  const updates = (products ?? []).map((p: any) => {
     const nm = p.nm_id
     const ord30 = ord30Map[nm] ?? 0
     const sal30 = sal30Map[nm] ?? 0
@@ -451,18 +456,130 @@ export async function recalcProductAggregates(
   })
 
   for (const chunk of chunkArray(updates, 100)) {
-    await db.from('products').upsert(chunk, { onConflict: 'store_id,nm_id' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await db.from('products').upsert(chunk as any, { onConflict: 'store_id,nm_id' })
   }
   log(`агрегаты: пересчитано ${updates.length} товаров`)
 }
 
 // ─────────────────────────────────────────────
+// ПЛАТНОЕ ХРАНЕНИЕ — окна по 31 дню
+// Требует wb_analytics_token. Грузим с 2026-01-01.
+// ─────────────────────────────────────────────
+async function initialStorage(
+  store: { id: string; wb_token: string; wb_analytics_token?: string },
+  log: (m: string) => void,
+) {
+  if (!store.wb_analytics_token) {
+    log(`storage: пропуск — нет wb_analytics_token`)
+    return
+  }
+  const db = adminClient()
+  const wb = createWBClient(store.wb_token, store.wb_analytics_token)
+
+  // Грузим с 2026-01-01 до вчера (API не возвращает текущий день)
+  const START_DATE = new Date('2026-01-01')
+  const yesterday = addDays(new Date(), -1)
+  yesterday.setHours(0, 0, 0, 0)
+
+  // WB API: максимальное окно 8 дней
+  const windows: { from: Date; to: Date }[] = []
+  let cur = new Date(START_DATE)
+  while (cur <= yesterday) {
+    const windowEnd = addDays(cur, 7)
+    windows.push({ from: new Date(cur), to: windowEnd > yesterday ? new Date(yesterday) : windowEnd })
+    cur = addDays(windowEnd, 1)
+  }
+
+  log(`storage: ${windows.length} окон с ${dateStr(START_DATE)} по ${dateStr(yesterday)}`)
+  let totalRows = 0
+
+  for (let i = 0; i < windows.length; i++) {
+    const { from, to } = windows[i]
+    const fromStr = dateStr(from)
+    const toStr = dateStr(to)
+    log(`storage: окно ${i + 1}/${windows.length}: ${fromStr} → ${toStr}`)
+    const t0 = Date.now()
+    try {
+      const rows = await wb.getPaidStorage(fromStr, toStr)
+      if (!rows.length) {
+        log(`storage: окно ${i + 1} — пусто`)
+        await logSync(db, store.id, 'storage', fromStr, toStr, 0, Date.now() - t0)
+        continue
+      }
+
+      // Агрегируем SUM(warehousePrice) по ключу (date, nm_id, warehouse, barcode).
+      // WB API возвращает несколько строк на один ключ с разными calcType:
+      // тариф (+) и скидка на период поставки (−). Нельзя брать одну строку —
+      // нужна сумма всех, иначе скидки теряются и стоимость завышается в 2–3 раза.
+      const aggMap = new Map<string, {
+        store_id: string; date: string; nm_id: number
+        vendor_code: string | null; barcode: string | null
+        subject: string | null; brand: string | null
+        warehouse: string | null; volume: number | null
+        cost: number; cost_per_unit: number | null
+        barcodes_count: number | null; calc_type: string | null
+      }>()
+
+      for (const r of rows) {
+        const date = r.date.substring(0, 10)
+        const key = `${date}|${r.nmId}|${r.warehouse ?? ''}|${r.barcode ?? ''}`
+        if (!aggMap.has(key)) {
+          aggMap.set(key, {
+            store_id: store.id,
+            date,
+            nm_id: r.nmId,
+            vendor_code: r.vendorCode ?? null,
+            barcode: r.barcode ?? null,
+            subject: r.subject ?? null,
+            brand: r.brand ?? null,
+            warehouse: r.warehouse ?? null,
+            volume: r.volume ?? null,
+            cost: 0,
+            cost_per_unit: r.warehousePrice ?? null,
+            barcodes_count: r.barcodesCount ?? null,
+            calc_type: r.calcType ?? null,
+          })
+        }
+        aggMap.get(key)!.cost += r.warehousePrice ?? 0
+      }
+
+      const dbRows = Array.from(aggMap.values()).map(r => ({
+        ...r,
+        cost: Math.round(r.cost * 10000) / 10000,
+      }))
+
+      for (const chunk of chunkArray(dbRows, 500)) {
+        const { error } = await db.from('wb_storage_daily').upsert(chunk, {
+          onConflict: 'store_id,date,nm_id,warehouse,barcode',
+          ignoreDuplicates: false,
+        })
+        if (error) throw new Error(`storage upsert: ${error.message}`)
+      }
+
+      totalRows += dbRows.length
+      await logSync(db, store.id, 'storage', fromStr, toStr, dbRows.length, Date.now() - t0)
+      log(`storage: окно ${i + 1} ✓ ${dbRows.length} строк за ${Math.round((Date.now() - t0) / 1000)}с`)
+
+      // 10с между окнами чтобы не давить API
+      if (i < windows.length - 1) await sleep(10_000)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await logSync(db, store.id, 'storage', fromStr, toStr, 0, Date.now() - t0, msg)
+      log(`storage: окно ${i + 1} ошибка — ${msg}`)
+    }
+  }
+
+  log(`storage: ✓ всего ${totalRows} строк за ${windows.length} окон`)
+}
+
+// ─────────────────────────────────────────────
 // ГЛАВНАЯ ФУНКЦИЯ
 // ─────────────────────────────────────────────
-export type InitialSyncMethod = 'orders' | 'sales' | 'incomes' | 'finance' | 'stocks' | 'products' | 'all'
+export type InitialSyncMethod = 'orders' | 'sales' | 'incomes' | 'finance' | 'stocks' | 'products' | 'storage' | 'all'
 
 export async function runInitialSync(
-  store: { id: string; name: string; wb_token: string },
+  store: { id: string; name: string; wb_token: string; wb_analytics_token?: string },
   methods: InitialSyncMethod[] = ['all'],
   onProgress: (msg: string) => void = console.log,
 ) {
@@ -494,6 +611,9 @@ export async function runInitialSync(
   }
   if (doAll || methods.includes('finance')) {
     await initialFinance(store, onProgress)
+  }
+  if (doAll || methods.includes('storage')) {
+    await initialStorage(store, onProgress)
   }
 
   onProgress(`=== Загрузка завершена ===`)

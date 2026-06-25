@@ -1,7 +1,8 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache curl dcron
+RUN apk add --no-cache curl
 
-COPY crontab /etc/crontabs/root
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
 
-CMD ["crond", "-f", "-l", "2"]
+CMD ["/run.sh"]

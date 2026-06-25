@@ -9,3 +9,6 @@
 
 # Комиссии — каждые 10 дней в 04:00 МСК (01:00 UTC)
 0 1 */10 * * curl -sf -X POST "$APP_URL/api/sync/commissions" -H "Authorization: Bearer $CRON_SECRET" >> /var/log/cron.log 2>&1
+
+# Финансовые отчёты WB — каждый понедельник в 14:00 МСК (11:00 UTC)
+0 11 * * 1 curl -sf -X GET "$APP_URL/api/cron/wb-finance-reports" -H "Authorization: Bearer $CRON_SECRET" >> /var/log/cron.log 2>&1

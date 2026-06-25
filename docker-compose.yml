@@ -1,15 +1,45 @@
 services:
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wbanalytics}
+      POSTGRES_USER: ${POSTGRES_USER:-wbuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wbuser} -d ${POSTGRES_DB:-wbanalytics}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wbuser}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wbanalytics}
+    command: ["node", "scripts/migrate.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
     ports:
       - "3000:3000"
     env_file:
       - .env.local
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   cron:
