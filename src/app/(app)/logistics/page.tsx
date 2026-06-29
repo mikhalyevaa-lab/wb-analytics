@@ -5,6 +5,7 @@ import { getServerSession } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 import { IrpWidget } from '@/components/logistics/irp-widget'
 import { LogisticsCosts } from '@/components/logistics/logistics-costs'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -119,10 +120,11 @@ export default async function LogisticsPage() {
 
   return (
     <div className="p-6 space-y-8 max-w-[1200px]">
-      <div>
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Логистика</h1>
-        <p className="text-sm text-zinc-400 mt-0.5">Индексы WB и затраты на доставку</p>
-      </div>
+      <PageHeader
+        picto="logistics"
+        title="Логистика"
+        subtitle="Индексы WB и затраты на доставку"
+      />
 
       <div className="space-y-4">
         <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Индексы WB</h2>

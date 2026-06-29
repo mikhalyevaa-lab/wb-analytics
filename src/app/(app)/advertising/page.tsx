@@ -5,6 +5,7 @@ import { CampaignsTable } from '@/components/advertising/campaigns-table'
 import { AdSyncPanel } from '@/components/advertising/ad-sync-panel'
 import { redirect } from 'next/navigation'
 import { Hint } from '@/components/ui/hint'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,15 +19,14 @@ export default async function AdvertisingPage() {
 
   return (
     <div className="space-y-8 p-6">
-      <div className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Реклама</h1>
+      <PageHeader picto="advertising" title="Реклама" subtitle="Кампании WB · ДРР · данные за последние 90 дней">
         <Hint width={340}>
           <strong>Блок Реклама</strong><br /><br />
           <strong>Источник данных:</strong> WB API рекламы (wb_ad_spend). WB хранит данные только за последние 90 дней — синхронизируйте регулярно чтобы не потерять историю.<br /><br />
           <strong>Анализ РК</strong> — детализация по каждой рекламной кампании с метриками эффективности.<br /><br />
           <strong>Заказы по рекламе</strong> — данные о заказах из рекламного кабинета WB. Могут отличаться от заказов в воронке продаж из-за разной методологии атрибуции.
         </Hint>
-      </div>
+      </PageHeader>
       <AdCards data={adData} />
 
       <AdSyncPanel />

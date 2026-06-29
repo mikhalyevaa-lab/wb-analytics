@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { Hint } from '@/components/ui/hint'
+import { PageHeader } from '@/components/ui/page-header'
 
 function moscowDate(offsetDays = 0) {
   const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
@@ -171,56 +172,42 @@ export default function FunnelPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1100px]">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Воронка продаж</h1>
-            <Hint width={340}>
-              <strong>Воронка продаж WB</strong><br /><br />
-              Показывает путь покупателя: Просмотр карточки → Добавление в корзину → Заказ → Выкуп.<br /><br />
-              <strong>Источник:</strong> метод аналитики WB (nmReportDetail). Данные агрегируются по дням и хранятся в таблице wb_funnel.<br /><br />
-              <strong>Важно:</strong> WB отдаёт данные с задержкой 1–2 дня. Данные за сегодня могут быть неполными.
-            </Hint>
-            {syncLabel && (
-              <span className="text-xs text-muted-foreground">данные по {syncLabel}</span>
-            )}
-          </div>
-          <p className="text-sm text-zinc-400 mt-0.5">Просмотры → Корзина → Заказы</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Presets */}
-          {PRESETS.map(p => (
-            <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
-              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-                activePreset === p.label
-                  ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-900'
-                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-              }`}>
-              {p.label}
+      <PageHeader picto="funnel" title="Воронка продаж" subtitle="Просмотры → Корзина → Заказы">
+        <Hint width={340}>
+          <strong>Воронка продаж WB</strong><br /><br />
+          Показывает путь покупателя: Просмотр карточки → Добавление в корзину → Заказ → Выкуп.<br /><br />
+          <strong>Источник:</strong> метод аналитики WB (nmReportDetail). Данные агрегируются по дням и хранятся в таблице wb_funnel.<br /><br />
+          <strong>Важно:</strong> WB отдаёт данные с задержкой 1–2 дня. Данные за сегодня могут быть неполными.
+        </Hint>
+        {syncLabel && <span className="text-xs text-zinc-500">данные по {syncLabel}</span>}
+        {PRESETS.map(p => (
+          <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
+            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+              activePreset === p.label
+                ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-900'
+                : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+            }`}>
+            {p.label}
+          </button>
+        ))}
+        <div className="flex items-center gap-1">
+          <input type="date" value={dateFrom}
+            onChange={e => { setDateFrom(e.target.value); setActivePreset('') }}
+            className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <span className="text-zinc-400">—</span>
+          <input type="date" value={dateTo}
+            onChange={e => { setDateTo(e.target.value); setActivePreset('') }}
+            className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          {!activePreset && (
+            <button onClick={() => load(dateFrom, dateTo, aggLevel)}
+              className="px-3 py-1.5 text-sm bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 text-white rounded-lg transition-colors">
+              Применить
             </button>
-          ))}
-
-          {/* Date picker */}
-          <div className="flex items-center gap-1">
-            <input type="date" value={dateFrom}
-              onChange={e => { setDateFrom(e.target.value); setActivePreset('') }}
-              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <span className="text-zinc-400">—</span>
-            <input type="date" value={dateTo}
-              onChange={e => { setDateTo(e.target.value); setActivePreset('') }}
-              className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            {!activePreset && (
-              <button onClick={() => load(dateFrom, dateTo, aggLevel)}
-                className="px-3 py-1.5 text-sm bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 text-white rounded-lg transition-colors">
-                Применить
-              </button>
-            )}
-          </div>
+          )}
         </div>
-      </div>
+      </PageHeader>
 
       {error && (
         <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>

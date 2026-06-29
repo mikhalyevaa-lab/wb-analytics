@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { AbcTable, type AbcRow } from '@/components/abc/abc-table'
 import { AbcPanel } from '@/components/abc/abc-panel'
 import { Hint } from '@/components/ui/hint'
+import { PageHeader } from '@/components/ui/page-header'
 
 function moscowDate(offsetDays = 0) {
   const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
@@ -95,61 +96,52 @@ export default function AbcPage() {
   return (
     <div className="flex h-full min-h-0">
       <div className={`flex-1 min-w-0 p-6 space-y-5 overflow-auto transition-all ${selectedRow ? 'max-w-[calc(100%-420px)]' : ''}`}>
-        {/* Header */}
-        <div className="flex items-start justify-between flex-wrap gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">ABC-анализ</h1>
-              <Hint width={340}>
-                <strong>ABC-анализ по выручке и маржинальности</strong><br /><br />
-                Делит все товары на три класса на основе двух критериев:<br /><br />
-                <strong>R (Revenue) — по выручке:</strong> A = топ {thA}% выручки, B = следующие {thB - thA}%, C = хвост.<br />
-                <strong>M (Margin) — по маржинальности:</strong> A ≥ {thMA}%, B ≥ {thMB}%, C — убыточные.<br /><br />
-                <strong>Источник данных:</strong> wb_sales (выкупы) за выбранный период. Требует заполненной себестоимости для маржи.
-              </Hint>
-            </div>
-            <p className="text-sm text-zinc-400 mt-0.5">Классификация по выручке и маржинальности</p>
+        <PageHeader picto="abc" title="ABC-анализ" subtitle="Классификация по выручке и маржинальности">
+          <Hint width={340}>
+            <strong>ABC-анализ по выручке и маржинальности</strong><br /><br />
+            Делит все товары на три класса на основе двух критериев:<br /><br />
+            <strong>R (Revenue) — по выручке:</strong> A = топ {thA}% выручки, B = следующие {thB - thA}%, C = хвост.<br />
+            <strong>M (Margin) — по маржинальности:</strong> A ≥ {thMA}%, B ≥ {thMB}%, C — убыточные.<br /><br />
+            <strong>Источник данных:</strong> wb_sales (выкупы) за выбранный период. Требует заполненной себестоимости для маржи.
+          </Hint>
+          {PRESETS.map(p => (
+            <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
+              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                activePreset === p.label
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border text-zinc-500 dark:text-zinc-400 hover:bg-muted'
+              }`}>
+              {p.label}
+            </button>
+          ))}
+          <div className="flex items-center gap-1">
+            <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActivePreset('') }}
+              className="text-sm px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100" />
+            <span className="text-zinc-400 text-sm">—</span>
+            <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setActivePreset('') }}
+              className="text-sm px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100" />
+            <button onClick={applyCustom}
+              className="px-3 py-1.5 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg hover:opacity-90">
+              Применить
+            </button>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {PRESETS.map(p => (
-              <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
-                className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-                  activePreset === p.label
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-border text-zinc-500 dark:text-zinc-400 hover:bg-muted'
-                }`}>
-                {p.label}
-              </button>
-            ))}
-            <div className="flex items-center gap-1">
-              <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setActivePreset('') }}
-                className="text-sm px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100" />
-              <span className="text-zinc-400 text-sm">—</span>
-              <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setActivePreset('') }}
-                className="text-sm px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100" />
-              <button onClick={applyCustom}
-                className="px-3 py-1.5 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg hover:opacity-90">
-                Применить
-              </button>
-            </div>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setShowSettings(s => !s)}
-                className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
-                  showSettings
-                    ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-                }`}>
-                ⚙ Пороги
-              </button>
-              <Hint width={300}>
-                <strong>Настройка порогов ABC</strong><br /><br />
-                <strong>По выручке:</strong> A = товары, формирующие первые {thA}% суммарной выручки. A+B = первые {thB}%. Всё остальное — C.<br /><br />
-                <strong>По маржинальности:</strong> A ≥ {thMA}% маржи, B ≥ {thMB}%. Требует заполненной себестоимости.<br /><br />
-                Изменение порогов пересчитывает классификацию без нового запроса к API.
-              </Hint>
-            </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setShowSettings(s => !s)}
+              className={`px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+                showSettings
+                  ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200'
+                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+              }`}>
+              ⚙ Пороги
+            </button>
+            <Hint width={300}>
+              <strong>Настройка порогов ABC</strong><br /><br />
+              <strong>По выручке:</strong> A = товары, формирующие первые {thA}% суммарной выручки. A+B = первые {thB}%. Всё остальное — C.<br /><br />
+              <strong>По маржинальности:</strong> A ≥ {thMA}% маржи, B ≥ {thMB}%. Требует заполненной себестоимости.<br /><br />
+              Изменение порогов пересчитывает классификацию без нового запроса к API.
+            </Hint>
           </div>
-        </div>
+        </PageHeader>
 
         {/* Threshold settings */}
         {showSettings && (

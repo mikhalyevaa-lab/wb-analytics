@@ -6,6 +6,7 @@ import { getServerSession } from '@/lib/auth-server'
 import { Hint } from '@/components/ui/hint'
 import { getUserStoreIds, getStores } from '@/lib/queries'
 import { CatalogTable } from '@/components/catalog/catalog-table'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,24 +93,16 @@ export default async function CatalogPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold">Справочник товаров</h1>
-          <Hint width={320}>
-            <strong>Источники данных справочника</strong><br /><br />
-            <strong>Карточки товаров</strong> — WB Content API. Обновляются при синхронизации (Настройки → Товары).<br /><br />
-            <strong>Цены, % выкупа, заказы/день</strong> — рассчитываются из wb_sales и wb_funnel за последние 30 дней.<br /><br />
-            <strong>Остатки</strong> — последние данные из wb_stocks.<br /><br />
-            <strong>Объём</strong> — из данных хранения WB (wb_storage_daily).
-          </Hint>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{products?.length ?? 0} артикулов</span>
-          <Hint width={260}>
-            Количество уникальных артикулов WB (nm_id) в вашем магазине. Каждый артикул — это отдельная карточка товара на Wildberries.
-          </Hint>
-        </div>
-      </div>
+      <PageHeader picto="catalog" title="Товары" subtitle="Карточки WB · цены, % выкупа, остатки">
+        <span className="text-sm text-zinc-500">{products?.length ?? 0} артикулов</span>
+        <Hint width={320}>
+          <strong>Источники данных справочника</strong><br /><br />
+          <strong>Карточки товаров</strong> — WB Content API. Обновляются при синхронизации (Настройки → Товары).<br /><br />
+          <strong>Цены, % выкупа, заказы/день</strong> — рассчитываются из wb_sales и wb_funnel за последние 30 дней.<br /><br />
+          <strong>Остатки</strong> — последние данные из wb_stocks.<br /><br />
+          <strong>Объём</strong> — из данных хранения WB (wb_storage_daily).
+        </Hint>
+      </PageHeader>
       <CatalogTable
         products={enriched}
         groups={groups ?? []}

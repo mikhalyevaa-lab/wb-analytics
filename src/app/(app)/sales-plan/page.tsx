@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { PageHeader } from '@/components/ui/page-header'
 
 interface PlanRow {
   week_label: string
@@ -170,10 +171,11 @@ export default function SalesPlanPage() {
 
   return (
     <div className="p-6 max-w-[1000px] space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">План продаж</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Загрузка и просмотр плана по артикулам и неделям</p>
-      </div>
+      <PageHeader
+        picto="sales-plan"
+        title="План продаж"
+        subtitle="Загрузка и просмотр плана по артикулам и неделям"
+      />
 
       {/* Шаблон + загрузка */}
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">

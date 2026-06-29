@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Hint } from '@/components/ui/hint'
+import { PageHeader } from '@/components/ui/page-header'
 
 interface KPI {
   total_cost: number
@@ -178,33 +179,28 @@ export default function StoragePage() {
 
   return (
     <div className="p-6 space-y-4 max-w-[1100px]">
-      {/* Шапка */}
-      <div>
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Хранение WB</h1>
-          <Hint width={340}>
-            <strong>Блок Хранение WB</strong><br /><br />
-            <strong>Источник:</strong> отчёт о платном хранении WB (wb_storage_daily). WB списывает деньги за каждый товар, находящийся на складе.<br /><br />
-            <strong>Как обновить:</strong> Настройки → Синхронизация → Хранение WB. Или нажмите «Загрузить историю» для загрузки данных за 12 месяцев.<br /><br />
-            WB публикует данные о хранении с задержкой 1–2 дня.
-          </Hint>
-          {lastDate && (() => {
-            const dateStr = new Date(lastDate).toLocaleDateString('ru', { day: 'numeric', month: 'long' })
-            const timeStr = lastSyncAt
-              ? new Date(new Date(lastSyncAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(11, 16) + ' мск'
-              : null
-            return (
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                данные по {dateStr}{timeStr ? `, ${timeStr}` : ''}
-                <Hint width={260}>
-                  Дата последней записи в базе данных хранения. Если дата устарела — запустите синхронизацию в Настройках.
-                </Hint>
-              </span>
-            )
-          })()}
-        </div>
-        <p className="text-sm text-zinc-400 mt-0.5">Затраты на хранение по SKU и дням</p>
-      </div>
+      <PageHeader picto="storage" title="Хранение WB" subtitle="Затраты на хранение по SKU и дням">
+        <Hint width={340}>
+          <strong>Блок Хранение WB</strong><br /><br />
+          <strong>Источник:</strong> отчёт о платном хранении WB (wb_storage_daily). WB списывает деньги за каждый товар, находящийся на складе.<br /><br />
+          <strong>Как обновить:</strong> Настройки → Синхронизация → Хранение WB. Или нажмите «Загрузить историю» для загрузки данных за 12 месяцев.<br /><br />
+          WB публикует данные о хранении с задержкой 1–2 дня.
+        </Hint>
+        {lastDate && (() => {
+          const dateStr = new Date(lastDate).toLocaleDateString('ru', { day: 'numeric', month: 'long' })
+          const timeStr = lastSyncAt
+            ? new Date(new Date(lastSyncAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(11, 16) + ' мск'
+            : null
+          return (
+            <span className="text-xs text-zinc-500 flex items-center gap-1">
+              данные по {dateStr}{timeStr ? `, ${timeStr}` : ''}
+              <Hint width={260}>
+                Дата последней записи в базе данных хранения. Если дата устарела — запустите синхронизацию в Настройках.
+              </Hint>
+            </span>
+          )
+        })()}
+      </PageHeader>
 
       {/* Пресеты + дейтпикер */}
       <div className="flex items-center gap-2 flex-wrap">

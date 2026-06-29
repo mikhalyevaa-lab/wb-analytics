@@ -6,6 +6,7 @@ import { SettingsForm } from '@/components/settings/settings-form'
 import { StoreSettingsForm } from '@/components/settings/store-settings-form'
 import { SyncStatus } from '@/components/settings/sync-status'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,10 +35,11 @@ export default async function SettingsPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[700px]">
-      <div>
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Настройки</h1>
-        <p className="text-sm text-zinc-400 mt-0.5">Управление магазином и уведомлениями</p>
-      </div>
+      <PageHeader
+        picto="settings"
+        title="Настройки"
+        subtitle="Управление магазином и уведомлениями"
+      />
 
       <SettingsForm
         storeId={primaryStore.id}

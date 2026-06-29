@@ -6,6 +6,7 @@ import { DeductionsSection } from '@/components/pnl/deductions-section'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ExportButton } from '@/components/export-button'
 import Link from 'next/link'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,22 +89,15 @@ export default async function PnLPage({
 
   return (
     <div className="p-6 space-y-6 max-w-[760px]">
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">P&L отчёт</h1>
-          <p className="text-sm text-zinc-400 mt-0.5">{label}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <ExportButton href={`/api/export/pnl?from=${from}&to=${to}`} />
-          <Link
-            href="/costs"
-            className="px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-          >
-            + Добавить затраты
-          </Link>
-        </div>
-      </div>
+      <PageHeader picto="pnl" title="P&L отчёт" subtitle={label}>
+        <ExportButton href={`/api/export/pnl?from=${from}&to=${to}`} />
+        <Link
+          href="/costs"
+          className="px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+        >
+          + Добавить затраты
+        </Link>
+      </PageHeader>
 
       {/* Period selector */}
       <div className="flex items-center gap-2 flex-wrap">

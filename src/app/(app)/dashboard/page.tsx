@@ -7,6 +7,7 @@ import { MonthCards } from '@/components/dashboard/month-cards'
 import { SalesChart } from '@/components/dashboard/sales-chart'
 import { TopProducts } from '@/components/dashboard/top-products'
 import { DataQualityAlert } from '@/components/dashboard/data-quality-alert'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,21 +52,15 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px]">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Дашборд</h1>
-            <Hint width={340}>
-              <strong>Источники данных дашборда</strong><br /><br />
-              <strong>Заказы / Сумма</strong> — воронка продаж WB (wb_funnel). Обновляется вручную или по расписанию.<br /><br />
-              <strong>Выручка</strong> — wb_sales, только выкупленные позиции (for_pay &gt; 0).<br /><br />
-              <strong>Реклама / Переходы</strong> — API рекламы WB (wb_ad_spend). WB хранит данные за последние 90 дней.<br /><br />
-              <strong>Прогноз</strong> — линейная экстраполяция текущего темпа на весь месяц.
-            </Hint>
-          </div>
-          <p className="text-sm text-zinc-400 mt-0.5">Обновлено: {now}</p>
-        </div>
-      </div>
+      <PageHeader picto="dashboard" title="Дашборд" subtitle={`Обновлено: ${now}`}>
+        <Hint width={340}>
+          <strong>Источники данных дашборда</strong><br /><br />
+          <strong>Заказы / Сумма</strong> — воронка продаж WB (wb_funnel). Обновляется вручную или по расписанию.<br /><br />
+          <strong>Выручка</strong> — wb_sales, только выкупленные позиции (for_pay &gt; 0).<br /><br />
+          <strong>Реклама / Переходы</strong> — API рекламы WB (wb_ad_spend). WB хранит данные за последние 90 дней.<br /><br />
+          <strong>Прогноз</strong> — линейная экстраполяция текущего темпа на весь месяц.
+        </Hint>
+      </PageHeader>
 
       <DataQualityAlert />
 

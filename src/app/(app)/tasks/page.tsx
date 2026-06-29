@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { PageHeader } from '@/components/ui/page-header'
 
 interface Task {
   id: number
@@ -98,18 +99,14 @@ export default function TasksPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1200px]">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Задачи</h1>
-          <p className="text-sm text-zinc-400 mt-0.5">{tasks.length} задач</p>
-        </div>
+      <PageHeader picto="tasks" title="Задачи" subtitle={`${tasks.length} задач`}>
         <button
           onClick={() => setShowForm(true)}
           className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
         >
           + Новая задача
         </button>
-      </div>
+      </PageHeader>
 
       {/* Filter */}
       <div className="flex gap-2">

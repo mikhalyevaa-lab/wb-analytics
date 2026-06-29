@@ -19,6 +19,7 @@ import { YesterdayCards } from '@/components/overview/yesterday-cards'
 import { ProfitWaterfall } from '@/components/overview/profit-waterfall'
 import { OrdersChart } from '@/components/overview/orders-chart'
 import { TopTasks } from '@/components/overview/top-tasks'
+import { PageHeader } from '@/components/ui/page-header'
 
 function startOfYear(): string {
   return `${new Date().getFullYear()}-01-01`
@@ -73,28 +74,17 @@ export default async function OverviewPage({ searchParams }: PageProps) {
 
   return (
     <div className="p-6 space-y-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Обзор</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{periodLabel}</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {[
-            { label: 'С начала года', href: '/overview' },
-            { label: '30 дней', href: `/overview?from=${(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0] })()}&to=${today()}` },
-            { label: '90 дней', href: `/overview?from=${(() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0] })()}&to=${today()}` },
-          ].map(p => (
-            <a
-              key={p.label}
-              href={p.href}
-              className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
-            >
-              {p.label}
-            </a>
-          ))}
-        </div>
-      </div>
+      <PageHeader picto="overview" title="Обзор" subtitle={periodLabel}>
+        {[
+          { label: 'С начала года', href: '/overview' },
+          { label: '30 дней', href: `/overview?from=${(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0] })()}&to=${today()}` },
+          { label: '90 дней', href: `/overview?from=${(() => { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().split('T')[0] })()}&to=${today()}` },
+        ].map(p => (
+          <a key={p.label} href={p.href} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted transition-colors">
+            {p.label}
+          </a>
+        ))}
+      </PageHeader>
 
       {/* Block 1: Signal cards */}
       <SignalCards

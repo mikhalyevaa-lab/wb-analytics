@@ -6,6 +6,7 @@ import { getUserStoreIds, getStores } from '@/lib/queries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { CashflowForm } from '@/components/cashflow/cashflow-form'
 import { CashflowTable } from '@/components/cashflow/cashflow-table'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,10 +54,11 @@ export default async function CashflowPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1000px]">
-      <div>
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Cash Flow — Кредиты</h1>
-        <p className="text-sm text-zinc-400 mt-0.5">Платежи на 3 месяца вперёд</p>
-      </div>
+      <PageHeader
+        picto="cashflow"
+        title="Cash Flow — Кредиты"
+        subtitle="Платежи на 3 месяца вперёд"
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <Card className="py-4">

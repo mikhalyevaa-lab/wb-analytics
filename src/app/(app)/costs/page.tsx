@@ -6,6 +6,7 @@ import { CostsForm } from '@/components/costs/costs-form'
 import { CostsTable } from '@/components/costs/costs-table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ExportButton } from '@/components/export-button'
+import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,15 +49,13 @@ export default async function CostsPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1100px]">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Ручные затраты</h1>
-          <p className="text-sm text-zinc-400 mt-0.5">
-            {new Date(from).toLocaleDateString('ru', { month: 'long', year: 'numeric' })}
-          </p>
-        </div>
+      <PageHeader
+        picto="costs"
+        title="Ручные затраты"
+        subtitle={new Date(from).toLocaleDateString('ru', { month: 'long', year: 'numeric' })}
+      >
         <ExportButton href={`/api/export/pnl?from=${from}&to=${to}`} label="Экспорт P&L" />
-      </div>
+      </PageHeader>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
