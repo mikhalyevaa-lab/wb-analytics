@@ -90,14 +90,23 @@ export async function syncStore(store: Store): Promise<{
   const wb = createWBClient(store.wb_token)
   const results: Record<string, { count: number; error?: string }> = {}
 
-  // Заказы, продажи, финансы, поставки — каждый запуск (каждые 2 часа)
+  // Заказы, продажи — каждый запуск (каждые 2 часа), дельта за 7 дней
   await syncOrders(store, wb, db, results)
   await sleep(1000)
   await syncSales(store, wb, db, results)
   await sleep(1000)
-  await syncFinance(store, wb, db, results)
-  await sleep(1000)
   // syncIncomes пропущен — WB удалил эндпоинт /api/v1/supplier/incomes
+
+  // Финансы — раз в 24 часа (WB финализирует данные раз в сутки)
+  if (await shouldSync(store.id, 'finance', 24, db)) {
+    await logSync(store.id, 'finance', db, async () => {
+      await syncFinance(store, wb, db, results)
+      return results.finance ?? { count: 0 }
+    })
+    await sleep(1000)
+  } else {
+    console.log(`[sync] finance: throttled`)
+  }
 
   // Остатки и товары — раз в 12 часов
   if (await shouldSync(store.id, 'stocks', 12, db)) {
@@ -125,9 +134,26 @@ export async function syncStore(store: Store): Promise<{
   }
   await sleep(1000)
 
-  await syncAdvert(store, wb, db, results)
-  await sleep(1000)
-  await syncFunnel(store, db, results)
+  // Реклама — раз в 6 часов
+  if (await shouldSync(store.id, 'advert', 6, db)) {
+    await logSync(store.id, 'advert', db, async () => {
+      await syncAdvert(store, wb, db, results)
+      return results.advert ?? { count: 0 }
+    })
+    await sleep(1000)
+  } else {
+    console.log(`[sync] advert: throttled`)
+  }
+
+  // Воронка — раз в 24 часа (данные с дневной точностью)
+  if (await shouldSync(store.id, 'funnel', 24, db)) {
+    await logSync(store.id, 'funnel', db, async () => {
+      await syncFunnel(store, db, results)
+      return results.funnel ?? { count: 0 }
+    })
+  } else {
+    console.log(`[sync] funnel: throttled`)
+  }
 
   // Комиссии — раз в 240 часов (10 дней)
   if (await shouldSync(store.id, 'commissions', 240, db)) {
@@ -145,16 +171,7 @@ export async function syncStore(store: Store): Promise<{
     console.log(`[sync] tariffs: throttled`)
   }
   await sleep(500)
-
-  // Пересчёт агрегатов в таблице products (buyout_rate, avg_price, avg_orders_per_day, current_stock)
-  try {
-    await recalcProductAggregates(store.id, db, msg => console.log(`[sync] ${msg}`))
-    results.recalc = { count: 1 }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('[sync] recalc error:', msg)
-    results.recalc = { count: 0, error: msg }
-  }
+  // recalcProductAggregates убран — выполняется только в ночном синке (recalcAllStoresAggregates)
 
   const hasErrors = Object.values(results).some(r => r.error)
   console.log(`[sync] ${store.name}: завершено`, results)
