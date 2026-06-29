@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ExportButton } from '@/components/export-button'
 import Link from 'next/link'
 import { PageHeader } from '@/components/ui/page-header'
+import { WaterfallChart } from '@/components/pnl/waterfall-chart'
 
 export const dynamic = 'force-dynamic'
 
@@ -157,6 +158,16 @@ export default async function PnLPage({
         </CardHeader>
         <CardContent className="p-0">
           <PnLBreakdown wb={wb} manualTotal={manualTotal} manualByCategory={manualByCategory} />
+        </CardContent>
+      </Card>
+
+      {/* Waterfall P&L */}
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
+          <CardTitle className="text-base">Waterfall P&L</CardTitle>
+        </CardHeader>
+        <CardContent className="p-5">
+          <WaterfallChart wb={wb} manualTotal={manualTotal} />
         </CardContent>
       </Card>
 

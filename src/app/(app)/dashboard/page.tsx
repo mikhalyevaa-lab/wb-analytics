@@ -8,6 +8,7 @@ import { SalesChart } from '@/components/dashboard/sales-chart'
 import { TopProducts } from '@/components/dashboard/top-products'
 import { DataQualityAlert } from '@/components/dashboard/data-quality-alert'
 import { PageHeader } from '@/components/ui/page-header'
+import { HeatCalendar } from '@/components/dashboard/heat-calendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,6 +73,14 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <TopProducts />
+      </div>
+
+      {/* Heat Calendar — 84 дня выкупов */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Тепловой календарь — 84 дня выкупов</h2>
+        <div className="bg-card border rounded-xl p-4">
+          <HeatCalendar />
+        </div>
       </div>
     </div>
   )

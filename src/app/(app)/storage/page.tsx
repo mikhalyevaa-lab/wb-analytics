@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Hint } from '@/components/ui/hint'
 import { PageHeader } from '@/components/ui/page-header'
+import { VelocityMatrix } from '@/components/storage/velocity-matrix'
 
 interface KPI {
   total_cost: number
@@ -396,6 +397,15 @@ export default function StoragePage() {
           {filtered.length === 0 && (
             <div className="text-center py-8 text-muted-foreground text-sm">Нет данных</div>
           )}
+        </div>
+      </div>
+
+      {/* Velocity Matrix — скорость продаж vs остатки */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Velocity Matrix — скорость продаж × дней остатка</h2>
+        <p className="text-xs text-zinc-500">Каждая точка — артикул. Данные: wb_stocks + wb_sales за 30 дней</p>
+        <div className="bg-card border rounded-xl p-4">
+          <VelocityMatrix />
         </div>
       </div>
     </div>
