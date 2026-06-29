@@ -11,23 +11,26 @@ function fmtAgo(h: number | null): string {
 }
 
 function StatusDot({ status }: { status: DataQualityItem['status'] }) {
-  const cls = {
-    ok:    'bg-emerald-500',
-    stale: 'bg-amber-400',
-    error: 'bg-red-500',
-    never: 'bg-zinc-300 dark:bg-zinc-600',
-  }[status]
-  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${cls}`} />
+  const cls: Record<DataQualityItem['status'], string> = {
+    ok:      'bg-emerald-500',
+    stale:   'bg-amber-400',
+    error:   'bg-red-500',
+    never:   'bg-zinc-300 dark:bg-zinc-600',
+    syncing: 'bg-blue-400 animate-pulse',
+  }
+  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${cls[status]}`} />
 }
 
 function StatusLabel({ status }: { status: DataQualityItem['status'] }) {
-  const map = {
-    ok:    { text: 'Актуально',     cls: 'text-emerald-600 dark:text-emerald-400' },
-    stale: { text: 'Устарело',      cls: 'text-amber-600 dark:text-amber-400' },
-    error: { text: 'Ошибка',        cls: 'text-red-500' },
-    never: { text: 'Нет данных',    cls: 'text-zinc-400' },
-  }[status]
-  return <span className={`text-xs font-medium ${map.cls}`}>{map.text}</span>
+  const map: Record<DataQualityItem['status'], { text: string; cls: string }> = {
+    ok:      { text: 'Актуально',       cls: 'text-emerald-600 dark:text-emerald-400' },
+    stale:   { text: 'Устарело',        cls: 'text-amber-600 dark:text-amber-400' },
+    error:   { text: 'Ошибка',          cls: 'text-red-500' },
+    never:   { text: 'Нет данных',      cls: 'text-zinc-400' },
+    syncing: { text: 'Синхронизация…',  cls: 'text-blue-500 dark:text-blue-400' },
+  }
+  const m = map[status]
+  return <span className={`text-xs font-medium ${m.cls}`}>{m.text}</span>
 }
 
 export function DataQuality() {

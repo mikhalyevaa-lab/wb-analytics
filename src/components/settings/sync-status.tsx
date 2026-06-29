@@ -15,13 +15,14 @@ function isoDate(d: Date) {
 }
 
 function StatusDot({ status }: { status: DataQualityItem['status'] }) {
-  const cls = {
-    ok:    'bg-emerald-500',
-    stale: 'bg-amber-400',
-    error: 'bg-red-500',
-    never: 'bg-zinc-300 dark:bg-zinc-600',
-  }[status]
-  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${cls}`} />
+  const cls: Record<DataQualityItem['status'], string> = {
+    ok:      'bg-emerald-500',
+    stale:   'bg-amber-400',
+    error:   'bg-red-500',
+    never:   'bg-zinc-300 dark:bg-zinc-600',
+    syncing: 'bg-blue-400 animate-pulse',
+  }
+  return <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${cls[status]}`} />
 }
 
 // Маппинг метода → endpoint для ручного запуска
@@ -35,7 +36,7 @@ const SYNC_ENDPOINTS: Record<string, { url: string; body?: object; label: string
   tariffs:     { url: '/api/sync/tariffs',      body: {},                         label: 'Тарифы' },
   commissions: { url: '/api/sync/commissions',  body: {},                         label: 'Комиссии' },
   funnel:      { url: '/api/sync/funnel-initial', body: {},                       label: 'Воронка' },
-  incomes:     { url: '/api/sync/initial',      body: { methods: ['incomes'] }, label: 'Поставки' },
+  // incomes убран — WB удалил API эндпоинт
   // advertising обрабатывается отдельно (требует dateFrom / dateTo)
 }
 
@@ -130,13 +131,14 @@ export function SyncStatus() {
   }
 
   const statusColors: Record<DataQualityItem['status'], string> = {
-    ok:    'text-emerald-600 dark:text-emerald-400',
-    stale: 'text-amber-600 dark:text-amber-400',
-    error: 'text-red-500',
-    never: 'text-zinc-400',
+    ok:      'text-emerald-600 dark:text-emerald-400',
+    stale:   'text-amber-600 dark:text-amber-400',
+    error:   'text-red-500',
+    never:   'text-zinc-400',
+    syncing: 'text-blue-500 dark:text-blue-400',
   }
   const statusLabels: Record<DataQualityItem['status'], string> = {
-    ok: 'Актуально', stale: 'Устарело', error: 'Ошибка', never: 'Нет данных',
+    ok: 'Актуально', stale: 'Устарело', error: 'Ошибка', never: 'Нет данных', syncing: 'Синхронизация…',
   }
 
   return (

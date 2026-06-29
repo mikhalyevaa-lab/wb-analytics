@@ -576,7 +576,7 @@ async function initialStorage(
 // ─────────────────────────────────────────────
 // ГЛАВНАЯ ФУНКЦИЯ
 // ─────────────────────────────────────────────
-export type InitialSyncMethod = 'orders' | 'sales' | 'incomes' | 'finance' | 'stocks' | 'products' | 'storage' | 'all'
+export type InitialSyncMethod = 'orders' | 'sales' | 'finance' | 'stocks' | 'products' | 'storage' | 'all'
 
 export async function runInitialSync(
   store: { id: string; name: string; wb_token: string; wb_analytics_token?: string },
@@ -604,11 +604,7 @@ export async function runInitialSync(
     onProgress(`ожидание ${STATS_RATE_LIMIT_MS / 1000}с…`)
     await sleep(STATS_RATE_LIMIT_MS)
   }
-  if (doAll || methods.includes('incomes')) {
-    await initialIncomes(store, onProgress)
-    onProgress(`ожидание ${STATS_RATE_LIMIT_MS / 1000}с…`)
-    await sleep(STATS_RATE_LIMIT_MS)
-  }
+  // incomes пропущен — WB удалил эндпоинт /api/v1/supplier/incomes
   if (doAll || methods.includes('finance')) {
     await initialFinance(store, onProgress)
   }

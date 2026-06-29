@@ -59,6 +59,13 @@ async function logSync(
   fn: () => Promise<{ count: number; error?: string }>
 ): Promise<{ count: number; error?: string }> {
   const startMs = Date.now()
+  // Помечаем зависшие 'running' записи как interrupted перед новым запуском
+  await db.from('sync_log').update({
+    status: 'error',
+    error: 'interrupted',
+    finished_at: new Date().toISOString(),
+  }).eq('store_id', storeId).eq('method', method).eq('status', 'running')
+
   const { data: logRow } = await db
     .from('sync_log')
     .insert({ store_id: storeId, method, status: 'running' })
@@ -1013,7 +1020,7 @@ async function syncPaidStorageInternal(
     const rows = await wb.getPaidStorage(from3, today)
     if (!rows?.length) { results.storage = { count: 0 }; return }
 
-    const dbRows = rows.map(r => ({
+    const rawDbRows = rows.map(r => ({
       store_id:    store.id,
       date:        r.date?.split('T')[0] ?? r.originalDate?.split('T')[0] ?? today,
       nm_id:       r.nmId,
@@ -1027,6 +1034,14 @@ async function syncPaidStorageInternal(
       barcodes_count: r.barcodesCount ?? null,
       calc_type:      r.calcType ?? null,
     }))
+    // WB API иногда отдаёт дубли в одной выгрузке — дедупликация по ключу upsert
+    const seenStorage = new Set<string>()
+    const dbRows = rawDbRows.filter(r => {
+      const key = `${r.date}|${r.nm_id}|${r.warehouse}|${r.barcode}`
+      if (seenStorage.has(key)) return false
+      seenStorage.add(key)
+      return true
+    })
 
     let total = 0
     for (const chunk of chunkArray(dbRows, 500)) {

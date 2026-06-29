@@ -17,7 +17,6 @@ const STALE_AFTER: Record<string, number> = {
   funnel:      25,
   products:    25,
   advertising: 25,
-  incomes:     25,
 }
 
 const LABELS: Record<string, string> = {
@@ -31,7 +30,6 @@ const LABELS: Record<string, string> = {
   funnel:      'Воронка',
   products:    'Товары',
   advertising: 'Реклама',
-  incomes:     'Поставки',
 }
 
 export interface DataQualityItem {
@@ -41,7 +39,7 @@ export interface DataQualityItem {
   lastOk:    string | null // ISO string of last successful run
   lastRows:  number | null
   lastStatus: string | null
-  status:    'ok' | 'stale' | 'error' | 'never'
+  status:    'ok' | 'stale' | 'error' | 'never' | 'syncing'
   hoursAgo:  number | null
 }
 
@@ -72,13 +70,26 @@ export async function GET() {
 
   const rows = (logs ?? []) as { method: string; status: string; rows_count: number; created_at: string }[]
 
-  const byMethod: Record<string, { lastRun: string; lastOk: string | null; lastRows: number; lastStatus: string }> = {}
+  // lastRun = самая свежая запись; lastCompleted = последняя не-running запись
+  const byMethod: Record<string, {
+    lastRun: string; lastRows: number; lastStatus: string; lastOk: string | null
+    lastCompletedStatus: string | null; lastCompletedAt: string | null; lastCompletedRows: number | null
+  }> = {}
   for (const r of rows) {
     if (!byMethod[r.method]) {
-      byMethod[r.method] = { lastRun: r.created_at, lastRows: r.rows_count, lastStatus: r.status, lastOk: null }
+      byMethod[r.method] = {
+        lastRun: r.created_at, lastRows: r.rows_count, lastStatus: r.status, lastOk: null,
+        lastCompletedStatus: null, lastCompletedAt: null, lastCompletedRows: null,
+      }
     }
-    if (!byMethod[r.method].lastOk && (r.status === 'ok' || r.status === 'done')) {
-      byMethod[r.method].lastOk = r.created_at
+    const info = byMethod[r.method]
+    if (info.lastCompletedStatus === null && r.status !== 'running') {
+      info.lastCompletedStatus = r.status
+      info.lastCompletedAt    = r.created_at
+      info.lastCompletedRows  = r.rows_count
+    }
+    if (!info.lastOk && (r.status === 'ok' || r.status === 'done')) {
+      info.lastOk = r.created_at
     }
   }
 
@@ -114,6 +125,24 @@ export async function GET() {
 
     const hoursAgo = Math.round((now - new Date(info.lastRun).getTime()) / 3600000 * 10) / 10
     const threshold = STALE_AFTER[method] ?? 25
+
+    // Если последняя запись 'running' — синк сейчас идёт или завис
+    if (info.lastStatus === 'running') {
+      const runningMinutes = Math.round((now - new Date(info.lastRun).getTime()) / 60000)
+      if (runningMinutes < 30) {
+        // Свежий 'running' — синк в процессе
+        return { method, label: LABELS[method], lastRun: info.lastRun, lastOk: info.lastOk, lastRows: info.lastRows, lastStatus: 'running', status: 'syncing', hoursAgo: null }
+      }
+      // Старый 'running' (завис) — смотрим на последнюю завершённую запись
+      const compStatus = info.lastCompletedStatus
+      const compAt     = info.lastCompletedAt
+      const compHours  = compAt ? Math.round((now - new Date(compAt).getTime()) / 3600000 * 10) / 10 : null
+      const isCompOk   = compStatus === 'ok' || compStatus === 'done'
+      let status: DataQualityItem['status'] = isCompOk ? (compHours != null && compHours > threshold ? 'stale' : 'ok') : 'error'
+      if (!compStatus) status = 'error'
+      return { method, label: LABELS[method], lastRun: info.lastRun, lastOk: info.lastOk, lastRows: info.lastCompletedRows, lastStatus: compStatus ?? 'running', status, hoursAgo: compHours }
+    }
+
     const isOk = info.lastStatus === 'ok' || info.lastStatus === 'done'
     let status: DataQualityItem['status'] = 'ok'
     if (!isOk) status = 'error'
