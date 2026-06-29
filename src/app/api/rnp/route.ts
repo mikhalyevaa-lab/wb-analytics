@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   const adb = adminDb()
 
-  const [financeRes, salesRes, adRes, stocksRes, funnelRes] = await Promise.all([
+  const [financeRes, salesRes, adRes, stocksRes, funnelRes, ordersRes] = await Promise.all([
     // wb_finance — только штрафы и доп.выплаты
     adb.from('wb_finance')
       .select('date_from, date_to, penalty, additional_payment')
@@ -65,13 +65,22 @@ export async function GET(req: NextRequest) {
       .order('date', { ascending: false })
       .limit(50000),
 
-    // Воронка — заказы и переходы по дням (основной источник заказов)
+    // Воронка — заказы и переходы по дням (счётчик заказов из funnel API)
     adb.from('wb_funnel')
       .select('date, open_count, order_count, order_sum')
       .in('store_id', storeIds)
       .gte('date', dateFrom)
       .lte('date', dateTo)
       .limit(200000),
+
+    // Заказы — для расчёта суммы с учётом скидки продавца
+    adb.from('wb_orders')
+      .select('date, total_price, discount_percent')
+      .in('store_id', storeIds)
+      .gte('date', dateFrom)
+      .lte('date', dateTo + 'T23:59:59')
+      .eq('is_cancel', false)
+      .limit(500000),
   ])
 
   type FinRow     = { date_from: string | null; date_to: string | null; penalty: number | null; additional_payment: number | null }
@@ -79,12 +88,24 @@ export async function GET(req: NextRequest) {
   type AdRow      = { date: string | null; spend: number | null }
   type StockRow   = { quantity: number | null; date: string | null }
   type FunnelRow  = { date: string | null; open_count: number | null; order_count: number | null; order_sum: number | null }
+  type OrderRow   = { date: string | null; total_price: number | null; discount_percent: number | null }
 
   const finRows    = (financeRes.data ?? []) as FinRow[]
   const salesRows  = (salesRes.data   ?? []) as SaleRow[]
   const adRows     = (adRes.data      ?? []) as AdRow[]
   const stocks     = (stocksRes.data  ?? []) as StockRow[]
   const funnelRows = (funnelRes.data  ?? []) as FunnelRow[]
+  const orderRows  = (ordersRes.data  ?? []) as OrderRow[]
+
+  // Сумма заказов с учётом скидки продавца: total_price × (1 − discount_percent/100)
+  // Дата wb_orders хранится в UTC → конвертируем в МСК (+3ч) для совпадения с wb_funnel
+  const orderSumMap = new Map<string, number>()
+  for (const o of orderRows) {
+    if (!o.date) continue
+    const mskDay = new Date(new Date(o.date).getTime() + 3 * 3_600_000).toISOString().slice(0, 10)
+    const priceWithDisc = Number(o.total_price ?? 0) * (1 - Number(o.discount_percent ?? 0) / 100)
+    orderSumMap.set(mskDay, (orderSumMap.get(mskDay) ?? 0) + priceWithDisc)
+  }
 
   // Остаток ВБ — сумма quantity по всем складам на последнюю дату снапшота
   const toStr = (d: unknown) => typeof d === 'string' ? d.slice(0, 10) : d instanceof Date ? d.toISOString().slice(0, 10) : ''
@@ -177,9 +198,9 @@ export async function GET(req: NextRequest) {
     const acc = dayMap.get(date) ?? emptyDay()
     const funnel = funnelMap.get(date) ?? { open_count: 0, order_count: 0, order_sum: 0 }
 
-    // Заказы — из воронки (wb_funnel), чтобы данные совпадали со страницей Воронка
+    // Заказы: счётчик из воронки, сумма — из wb_orders с учётом скидки продавца
     const ordersCount = funnel.order_count
-    const ordersSum   = funnel.order_sum
+    const ordersSum   = orderSumMap.get(date) ?? funnel.order_sum
 
     // ДРР = расход на рекламу / сумма заказов * 100
     const drr = ordersSum > 0 ? (acc.ad_spend / ordersSum) * 100 : null
