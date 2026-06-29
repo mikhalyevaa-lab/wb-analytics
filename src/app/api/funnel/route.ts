@@ -46,8 +46,33 @@ export async function GET(req: NextRequest) {
     .order('date', { ascending: true }).limit(200000)
   if (nmId) prevQuery = prevQuery.eq('nm_id', parseInt(nmId))
 
-  const [{ data: rows, error }, { data: prevRows }] = await Promise.all([query, prevQuery])
+  // Заказы для замены order_sum — цена с учётом скидки продавца (оба периода)
+  let ordersQuery = adminDb().from('wb_orders')
+    .select('date, nm_id, total_price, discount_percent')
+    .in('store_id', storeIds)
+    .gte('date', prevFrom)
+    .lte('date', dateTo + 'T23:59:59')
+    .eq('is_cancel', false)
+    .limit(500000)
+  if (nmId) ordersQuery = ordersQuery.eq('nm_id', parseInt(nmId))
+
+  const [{ data: rows, error }, { data: prevRows }, { data: ordersData }] = await Promise.all([query, prevQuery, ordersQuery])
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Строим карты: total_price × (1 − discount_percent/100)
+  // wb_orders.date — UTC, wb_funnel.date — МСК дата → конвертируем +3ч
+  type OrderRow = { date: string | null; nm_id: number | null; total_price: number | null; discount_percent: number | null }
+  const orderSumByDate = new Map<string, number>()  // МСК-дата → сумма (оба периода)
+  const orderSumByNm   = new Map<number, number>()  // nm_id → сумма (текущий период)
+  for (const o of (ordersData ?? []) as OrderRow[]) {
+    if (!o.date) continue
+    const mskDay = new Date(new Date(o.date).getTime() + 3 * 3_600_000).toISOString().slice(0, 10)
+    const priceWithDisc = Number(o.total_price ?? 0) * (1 - Number(o.discount_percent ?? 0) / 100)
+    orderSumByDate.set(mskDay, (orderSumByDate.get(mskDay) ?? 0) + priceWithDisc)
+    if (mskDay >= dateFrom && mskDay <= dateTo && o.nm_id) {
+      orderSumByNm.set(o.nm_id, (orderSumByNm.get(o.nm_id) ?? 0) + priceWithDisc)
+    }
+  }
 
   // Aggregate by period (day or week)
   type PeriodAcc = {
@@ -71,7 +96,7 @@ export async function GET(req: NextRequest) {
       cur.open_count  += r.open_count  ?? 0
       cur.cart_count  += r.cart_count  ?? 0
       cur.order_count += r.order_count ?? 0
-      cur.order_sum   += r.order_sum   ?? 0
+      cur.order_sum   += orderSumByDate.get(r.date?.slice(0, 10) ?? '') ?? (r.order_sum ?? 0)
       cur.buyout_count += r.buyout_count ?? 0
       cur.buyout_sum  += r.buyout_sum  ?? 0
       cur.rows += 1
@@ -159,7 +184,7 @@ export async function GET(req: NextRequest) {
         open_count:        nm.open_count,
         cart_count:        nm.cart_count,
         order_count:       nm.order_count,
-        order_sum:         Math.round(nm.order_sum),
+        order_sum:         Math.round(orderSumByNm.get(nm.nm_id) ?? nm.order_sum),
         buyout_count:      nm.buyout_count,
         buyout_sum:        Math.round(nm.buyout_sum),
         add_to_cart_pct:   nm.open_count  > 0 ? (nm.cart_count  / nm.open_count)  * 100 : 0,
