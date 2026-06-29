@@ -20,6 +20,7 @@ export interface TodayStats { date: string; orders: number; revenue: number; adS
 export interface MonthStats {
   periodLabel: string; daysElapsed: number; daysInMonth: number
   orders: number; revenue: number; adSpend: number; clicks: number
+  sales: number; buyoutRate: number
   forecastOrders: number; forecastRevenue: number; forecastAdSpend: number; forecastClicks: number
 }
 export interface AdStats {
@@ -139,18 +140,22 @@ export async function getMonthStats(storeIds: string[]): Promise<MonthStats> {
   const monthStart = `${year}-${String(month+1).padStart(2,'0')}-01`
   const daysInMonth = new Date(Date.UTC(year,month+1,0)).getUTCDate()
   const todayStr = now.toISOString().split('T')[0]
-  if (!storeIds.length) return { periodLabel:`1–${day} ${MONTH_NAMES[month]}`, daysElapsed:day, daysInMonth, orders:0, revenue:0, adSpend:0, clicks:0, forecastOrders:0, forecastRevenue:0, forecastAdSpend:0, forecastClicks:0 }
+  if (!storeIds.length) return { periodLabel:`1–${day} ${MONTH_NAMES[month]}`, daysElapsed:day, daysInMonth, orders:0, revenue:0, adSpend:0, clicks:0, sales:0, buyoutRate:0, forecastOrders:0, forecastRevenue:0, forecastAdSpend:0, forecastClicks:0 }
 
-  const [ord, ad] = await Promise.all([
+  const [ord, ad, sal] = await Promise.all([
     // Заказы и сумма заказов — из воронки продаж (wb_funnel)
     db<{orders:number, order_sum:number}[]>`
       SELECT COALESCE(SUM(order_count),0) orders, COALESCE(SUM(order_sum),0) order_sum
       FROM wb_funnel WHERE store_id=ANY(${storeIds}) AND "date">=${monthStart}::date AND "date"<=${todayStr}::date`,
     db<{spend:number,clicks:number}[]>`SELECT COALESCE(SUM(spend),0) spend, COALESCE(SUM(clicks),0) clicks FROM wb_ad_spend WHERE store_id=ANY(${storeIds}) AND "date">=${monthStart}::date AND "date"<=${todayStr}::date`,
+    // Выкупы (реализации) — из wb_sales
+    db<{cnt:number}[]>`SELECT COUNT(*) cnt FROM wb_sales WHERE store_id=ANY(${storeIds}) AND is_realization=true AND "date">=${monthStart}::date AND "date"<=${todayStr}::date`,
   ])
   const orders=Number(ord[0].orders), revenue=Number(ord[0].order_sum), adSpend=Number(ad[0].spend), clicks=Number(ad[0].clicks)
+  const sales=Number(sal[0].cnt)
+  const buyoutRate=orders > 0 ? Math.round(sales/orders*100) : 0
   const scale = day > 0 ? daysInMonth/day : 1
-  return { periodLabel:`1–${day} ${MONTH_NAMES[month]}`, daysElapsed:day, daysInMonth, orders, revenue, adSpend, clicks, forecastOrders:Math.round(orders*scale), forecastRevenue:Math.round(revenue*scale), forecastAdSpend:Math.round(adSpend*scale), forecastClicks:Math.round(clicks*scale) }
+  return { periodLabel:`1–${day} ${MONTH_NAMES[month]}`, daysElapsed:day, daysInMonth, orders, revenue, adSpend, clicks, sales, buyoutRate, forecastOrders:Math.round(orders*scale), forecastRevenue:Math.round(revenue*scale), forecastAdSpend:Math.round(adSpend*scale), forecastClicks:Math.round(clicks*scale) }
 }
 
 export async function getStockAlerts(storeIds: string[]): Promise<StockItem[]> {

@@ -72,6 +72,14 @@ export function MonthCards({ stats }: { stats: MonthStats }) {
           <Stat label="Переходов" value={fmtNum(stats.clicks)}
             hint="Количество кликов по рекламным объявлениям с начала месяца." />
         </div>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+          <Stat label="Выкупы, шт" value={stats.sales.toLocaleString('ru')}
+            hint={<>Количество реализованных позиций с начала месяца. Источник: <code className="text-xs bg-muted px-1 rounded">wb_sales</code>, только строки с <code className="text-xs bg-muted px-1 rounded">is_realization = true</code>. Не включает отмены и возвраты.</>} />
+          <Stat label="% выкупа" value={stats.buyoutRate > 0 ? `${stats.buyoutRate}%` : '—'}
+            hint="Доля заказов, которые дошли до выкупа. = Выкупы ÷ Заказы × 100. Норма для WB: 50–80%. Низкий % может говорить о проблемах с описанием, размерной сеткой или качеством товара." />
+          <Stat label="Средний чек" value={stats.sales > 0 ? fmtRub(stats.revenue / stats.sales) : '—'}
+            hint={<>Средняя сумма одного заказа. = Сумма заказов ÷ Выкупы. Источник суммы — воронка WB (<code className="text-xs bg-muted px-1 rounded">wb_funnel</code>).</>} />
+        </div>
       </div>
 
       {/* Прогноз */}

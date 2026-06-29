@@ -34,7 +34,7 @@ type ApiResponse = {
 }
 
 const ROWS: { key: keyof DayData | 'avg_order_price_budget' | 'potential_profit_pct' | 'gross_profit'; label: string; format: 'money' | 'count' | 'pct' | 'text' | 'placeholder'; full?: boolean; hint?: string }[] = [
-  { key: 'orders_sum',               label: 'Сумма по заказам ₽',   format: 'money',       full: true,  hint: 'Суммарная стоимость заказов по дню. Источник: Воронка (wb_funnel).'                              },
+  { key: 'orders_sum',               label: 'Сумма по заказам ₽',   format: 'money',       full: true,  hint: 'Суммарная стоимость заказов со скидкой продавца (цена WB × (1 − скидка / 100)). Источник: wb_orders. Не равна розничной цене WB — учитывает скидку продавца.'  },
   { key: 'gross_profit',             label: 'Потенц. ЧП',            format: 'placeholder',              hint: 'В разработке. Плановая чистая прибыль с учётом себестоимости и комиссий.'                       },
   { key: 'potential_profit_pct',     label: '% потенц. прибыли',     format: 'placeholder',              hint: 'В разработке. Доля чистой прибыли от суммы заказов.'                                            },
   { key: 'orders_count',             label: 'Заказов',               format: 'count',                    hint: 'Количество заказов за день. Источник: Воронка (wb_funnel).'                                      },
