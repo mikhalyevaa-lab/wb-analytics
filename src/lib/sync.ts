@@ -97,8 +97,7 @@ export async function syncStore(store: Store): Promise<{
   await sleep(1000)
   await syncFinance(store, wb, db, results)
   await sleep(1000)
-  await syncIncomes(store, wb, db, results)
-  await sleep(1000)
+  // syncIncomes пропущен — WB удалил эндпоинт /api/v1/supplier/incomes
 
   // Остатки и товары — раз в 12 часов
   if (await shouldSync(store.id, 'stocks', 12, db)) {
