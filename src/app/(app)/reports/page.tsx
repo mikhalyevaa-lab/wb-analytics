@@ -575,7 +575,9 @@ export default function ReportsPage() {
       </section>
 
       <div className="border-t border-border" />
-      <FinanceSection />
+      <div id="finance-section">
+        <FinanceSection />
+      </div>
       <div className="border-t border-border" />
       <WeeklySection />
     </div>

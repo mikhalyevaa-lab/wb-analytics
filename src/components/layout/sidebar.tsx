@@ -24,9 +24,8 @@ const nav = [
   { href: '/supplies',       label: 'Поставки',              icon: '🚚' },
   { href: '/sales-plan',     label: 'План продаж',           icon: '◎' },
   { href: '/import',         label: 'Импорт данных',         icon: '↑' },
-  { href: '/fin-reports',    label: 'Фин. отчёты',           icon: '📋', requiresPnl: true },
   { href: '/settings',       label: 'Настройки',             icon: '⚙' },
-  { href: '/reports',        label: 'Отчёты WB',             icon: '📊', wip: true },
+  { href: '/reports',        label: 'Финансовые отчёты',     icon: '📊', requiresPnl: true },
 ]
 
 export function Sidebar({ storeName }: { storeName?: string }) {
@@ -73,7 +72,7 @@ export function Sidebar({ storeName }: { storeName?: string }) {
             >
               <span className="w-4 text-center text-base">{item.icon}</span>
               <span className="flex-1 truncate">{item.label}</span>
-              {'wip' in item && item.wip && (
+              {'wip' in item && (item as { wip?: boolean }).wip && (
                 <span className="shrink-0 text-[9px] font-medium px-1 py-0.5 rounded bg-zinc-700 text-zinc-400 leading-none">
                   WIP
                 </span>

@@ -167,21 +167,34 @@ export function SmartDetailTable() {
       {/* Таблица */}
       <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800">
-          <p className="text-sm text-zinc-500">
-            {loading ? 'Загрузка…' : `${total.toLocaleString('ru')} строк`}
-            {!loading && rows.some(r => r.superseded) && (
-              <span className="ml-2 text-xs text-zinc-400">· замещённые показаны приглушёнными</span>
+          <div>
+            <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+              Строки операций
+            </p>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              {loading ? 'Загрузка…' : `${total.toLocaleString('ru')} строк`}
+              {!loading && rows.some(r => r.superseded) && (
+                <span className="ml-1">· замещённые приглушены</span>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <a
+              href="#finance-section"
+              className="text-xs text-indigo-500 dark:text-indigo-400 hover:underline whitespace-nowrap flex items-center gap-1"
+            >
+              Сводные отчёты WB ↓
+            </a>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 text-sm">
+                <button onClick={() => load(page - 1)} disabled={page <= 1 || loading}
+                  className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 disabled:opacity-40">←</button>
+                <span className="text-zinc-500 text-xs">{page} / {totalPages}</span>
+                <button onClick={() => load(page + 1)} disabled={page >= totalPages || loading}
+                  className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 disabled:opacity-40">→</button>
+              </div>
             )}
-          </p>
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 text-sm">
-              <button onClick={() => load(page - 1)} disabled={page <= 1 || loading}
-                className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 disabled:opacity-40">←</button>
-              <span className="text-zinc-500 text-xs">{page} / {totalPages}</span>
-              <button onClick={() => load(page + 1)} disabled={page >= totalPages || loading}
-                className="px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 disabled:opacity-40">→</button>
-            </div>
-          )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
