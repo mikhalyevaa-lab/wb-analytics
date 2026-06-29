@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { ReturnsKpiCards } from '@/components/returns/kpi-cards'
-import { ReturnsTable } from '@/components/returns/returns-table'
+import { ReturnsTable }    from '@/components/returns/returns-table'
+import { BuyoutTrend }     from '@/components/returns/buyout-trend'
+import { BuyoutRadar }     from '@/components/returns/buyout-radar'
+import { Card, CardContent } from '@/components/ui/card'
 
 interface Summary {
   returns_28d: number
@@ -26,15 +29,14 @@ interface ProductItem {
 }
 
 export default function ReturnsPage() {
-  const [summary, setSummary]       = useState<Summary | null>(null)
-  const [items, setItems]           = useState<ProductItem[]>([])
-  const [total, setTotal]           = useState(0)
-  const [threshold, setThreshold]   = useState(40)
-  const [minSales, setMinSales]     = useState(3)
-  const [loading, setLoading]       = useState(true)
+  const [summary, setSummary]           = useState<Summary | null>(null)
+  const [items, setItems]               = useState<ProductItem[]>([])
+  const [total, setTotal]               = useState(0)
+  const [threshold, setThreshold]       = useState(40)
+  const [minSales, setMinSales]         = useState(3)
+  const [loading, setLoading]           = useState(true)
   const [loadingTable, setLoadingTable] = useState(false)
 
-  // Загружаем KPI-сводку
   useEffect(() => {
     fetch('/api/returns/summary')
       .then(r => r.json())
@@ -42,7 +44,6 @@ export default function ReturnsPage() {
       .catch(() => setLoading(false))
   }, [])
 
-  // Загружаем таблицу
   const loadTable = useCallback((thr: number, ms: number) => {
     setLoadingTable(true)
     fetch(`/api/returns/products?threshold=${thr}&min_sales=${ms}&limit=50`)
@@ -54,31 +55,43 @@ export default function ReturnsPage() {
   useEffect(() => { loadTable(threshold, minSales) }, [threshold, minSales, loadTable])
 
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-8 p-6 max-w-[1400px]">
       {/* Заголовок */}
       <div>
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Возвраты</h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Радар выкупа · где возвраты съедают выручку · последние 28 дней
+          Радар выкупа · худшие артикулы · тренд 28д / 84д · данные из wb_sales
         </p>
       </div>
 
       {/* KPI */}
       <ReturnsKpiCards data={summary} loading={loading} />
 
-      {/* Таблица */}
+      {/* Радар + Тренд */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardContent className="p-5">
+            <BuyoutRadar />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-5">
+            <BuyoutTrend />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Таблица худших артикулов */}
       <div>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Разобрать возвраты — худшие по выкупу
+              Худшие по выкупу
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              SKU с выкупом ниже порога · сортировка по % выкупа (худшие сверху)
+              SKU с выкупом ниже порога · 28 дней · сортировка снизу вверх
             </p>
           </div>
-
-          {/* Фильтры */}
           <div className="flex items-center gap-4 flex-wrap">
             <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
               Порог выкупа
@@ -87,7 +100,7 @@ export default function ReturnsPage() {
                 onChange={e => setThreshold(Number(e.target.value))}
                 className="h-8 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 text-sm"
               >
-                {[20, 30, 40, 50, 60].map(v => (
+                {[20, 30, 40, 50, 60, 80, 100].map(v => (
                   <option key={v} value={v}>&lt; {v}%</option>
                 ))}
               </select>
@@ -106,14 +119,16 @@ export default function ReturnsPage() {
             </label>
           </div>
         </div>
-
         <ReturnsTable items={items} loading={loadingTable} total={total} />
       </div>
 
       {/* Методология */}
       <div className="text-xs text-zinc-400 border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-1">
-        <p><strong>Методология:</strong> Возврат = строка wb_sales с is_realization = true и for_pay &lt; 0.</p>
-        <p>% выкупа = Выкупы / (Выкупы + Возвраты) × 100%. Данные оперативные — обновляются при синхронизации.</p>
+        <p>
+          <strong>Методология:</strong> Возврат = строка wb_sales с for_pay &lt; 0.
+          Выкуп = строка с for_pay &gt; 0.
+        </p>
+        <p>% выкупа = Выкупы / (Выкупы + Возвраты) × 100%. Данные оперативные.</p>
       </div>
     </div>
   )
