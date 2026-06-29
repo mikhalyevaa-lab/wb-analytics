@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { WeeklyTable } from '@/components/weekly/weekly-table'
 import { Hint } from '@/components/ui/hint'
 import Link from 'next/link'
+import { CrossCheckBlock } from '@/components/reports/crosscheck-block'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -184,6 +185,11 @@ function SummaryCard({ r }: { r: FinReport }) {
           ))}
         </div>
       </div>
+      <CrossCheckBlock
+        dateFrom={r.date_from}
+        dateTo={r.date_to}
+        reportStorageCost={r.storage_cost}
+      />
     </div>
   )
 }

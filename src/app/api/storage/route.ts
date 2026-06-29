@@ -184,14 +184,23 @@ export async function GET(req: Request) {
   const wastelandCount  = wastelandSkus.length
   const wastelandCost   = wastelandSkus.reduce((s, r) => s + r.cost_total, 0)
 
+  // Сравнение с еженедельным отчётом WB — суммируем storage_cost по отчётам, период которых пересекается с выбранным
+  const { db: pgDb } = await import('@/lib/db')
+  const weeklyRows = await pgDb<{ storage_cost: number }[]>`
+    SELECT COALESCE(SUM(storage_cost), 0) storage_cost
+    FROM wb_weekly_reports
+    WHERE store_id = ANY(${storeIds}) AND date_from <= ${dateTo}::date AND date_to >= ${dateFrom}::date`
+  const weeklyReportCost = Math.round(Number(weeklyRows[0]?.storage_cost ?? 0))
+
   return NextResponse.json({
     kpi: {
-      total_cost:      Math.round(totalCost * 100) / 100,
-      avg_per_day:     Math.round(avgPerDay * 100) / 100,
-      wasteland_cost:  Math.round(wastelandCost * 100) / 100,
-      wasteland_count: wastelandCount,
-      top_sku_cost:    skuList[0]?.cost_total ?? 0,
-      top_sku_nm_id:   skuList[0]?.nm_id ?? null,
+      total_cost:        Math.round(totalCost * 100) / 100,
+      avg_per_day:       Math.round(avgPerDay * 100) / 100,
+      wasteland_cost:    Math.round(wastelandCost * 100) / 100,
+      wasteland_count:   wastelandCount,
+      top_sku_cost:      skuList[0]?.cost_total ?? 0,
+      top_sku_nm_id:     skuList[0]?.nm_id ?? null,
+      weekly_report_cost: weeklyReportCost,
     },
     byDate,
     skuList,

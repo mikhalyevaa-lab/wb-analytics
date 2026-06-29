@@ -11,6 +11,7 @@ interface KPI {
   wasteland_count: number
   top_sku_cost: number
   top_sku_nm_id: number | null
+  weekly_report_cost?: number
 }
 
 interface DayRow  { date: string; cost: number }
@@ -279,6 +280,29 @@ export default function StoragePage() {
         </div>
       )}
 
+
+      {/* Кросс-проверка с еженедельным отчётом */}
+      {!loading && kpi && (kpi.weekly_report_cost ?? 0) > 0 && (() => {
+        const weekly = kpi.weekly_report_cost!
+        const dev = kpi.total_cost > 0 ? Math.round((kpi.total_cost / weekly - 1) * 100) : null
+        return (
+          <div className="rounded-xl border border-blue-100 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 px-4 py-3 flex items-center gap-4 flex-wrap">
+            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide whitespace-nowrap">
+              По еженедельному отчёту WB
+            </span>
+            <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{fmt(weekly)} ₽</span>
+            {dev !== null && (
+              <span className={`text-xs ${Math.abs(dev) > 25 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-400'}`}>
+                {dev > 0 ? '+' : ''}{dev}% к API paid_storage
+                {Math.abs(dev) > 25 && ' — расхождение >25%'}
+              </span>
+            )}
+            <span className="text-xs text-zinc-400 ml-auto">
+              Сумма storage_cost из отчётов WB за пересекающиеся периоды
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Таблица SKU */}
       <div className="rounded-xl border overflow-hidden">

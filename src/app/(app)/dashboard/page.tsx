@@ -6,6 +6,7 @@ import { TodayCards } from '@/components/dashboard/today-cards'
 import { MonthCards } from '@/components/dashboard/month-cards'
 import { SalesChart } from '@/components/dashboard/sales-chart'
 import { TopProducts } from '@/components/dashboard/top-products'
+import { DataQualityAlert } from '@/components/dashboard/data-quality-alert'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,6 +66,8 @@ export default async function DashboardPage() {
           <p className="text-sm text-zinc-400 mt-0.5">Обновлено: {now}</p>
         </div>
       </div>
+
+      <DataQualityAlert />
 
       <TodayCards />
 
