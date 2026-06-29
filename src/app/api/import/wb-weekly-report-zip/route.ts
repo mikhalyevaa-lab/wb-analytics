@@ -155,6 +155,8 @@ export async function POST(req: NextRequest) {
   const formData = await req.formData()
   const file = formData.get('file') as File | null
   const reportNumberParam = formData.get('reportNumber') as string | null
+  const reportSourceParam = formData.get('reportSource') as string | null
+  const reportSource: 'weekly' | 'daily' = reportSourceParam === 'daily' ? 'daily' : 'weekly'
 
   if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 })
 
@@ -212,6 +214,7 @@ export async function POST(req: NextRequest) {
     const record: Record<string, unknown> = {
       store_id: storeId,
       report_number: reportNumber,
+      report_source: reportSource,
     }
 
     for (const [dbField, idx] of Object.entries(colIndex)) {

@@ -37,18 +37,19 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     fileType: 'summary' | 'detail'
     reportNumber?: number
+    reportSource?: 'weekly' | 'daily'
     rows: (string | number | null)[][]
     headers: string[]
   }
 
-  const { fileType, rows, reportNumber } = body
+  const { fileType, rows, reportNumber, reportSource = 'weekly' } = body
   if (!fileType || !rows?.length) return NextResponse.json({ error: 'Missing fileType or rows' }, { status: 400 })
 
   try {
     if (fileType === 'summary') return await importSummary(storeId, rows)
     if (fileType === 'detail') {
       if (!reportNumber) return NextResponse.json({ error: 'reportNumber required for detail' }, { status: 400 })
-      return await importDetail(storeId, reportNumber, rows)
+      return await importDetail(storeId, reportNumber, reportSource, rows)
     }
     return NextResponse.json({ error: 'Unknown fileType' }, { status: 400 })
   } catch (err) {
@@ -136,7 +137,7 @@ async function importSummary(storeId: string, rows: (string | number | null)[][]
   return NextResponse.json({ ok: true, inserted, skipped: 0, reportNumber: reportNumbers[0] ?? null })
 }
 
-async function importDetail(storeId: string, reportNumber: number, rows: (string | number | null)[][]) {
+async function importDetail(storeId: string, reportNumber: number, reportSource: 'weekly' | 'daily', rows: (string | number | null)[][]) {
   const adb = adminDb()
 
   const toUpsert: Record<string, unknown>[] = []
@@ -152,6 +153,7 @@ async function importDetail(storeId: string, reportNumber: number, rows: (string
     toUpsert.push({
       store_id: storeId,
       report_number: reportNumber,
+      report_source: reportSource,
       row_number: n(row[0]),
       supply_number: row[1] ?? null,
       subject: row[2] ?? null,

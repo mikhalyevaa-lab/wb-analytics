@@ -5,6 +5,7 @@ import { WeeklyTable } from '@/components/weekly/weekly-table'
 import { Hint } from '@/components/ui/hint'
 import Link from 'next/link'
 import { CrossCheckBlock } from '@/components/reports/crosscheck-block'
+import { SmartDetailTable } from '@/components/reports/smart-detail-table'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -554,10 +555,29 @@ function FinanceSection() {
 
 export default function ReportsPage() {
   return (
-    <div className="p-6 max-w-[1200px] space-y-10">
-      <WeeklySection />
+    <div className="p-6 max-w-[1400px] space-y-10">
+      {/* Умная таблица: нед/дн/api с приоритетом */}
+      <section className="space-y-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Детализация строк</h2>
+            <Hint width={360}>
+              <strong>Умная таблица источников</strong><br /><br />
+              Показывает строки из всех доступных источников с автоматическим приоритетом:<br /><br />
+              <span className="text-emerald-400">● Еженедельный</span> — финальные данные из детализированного отчёта WB (наивысший приоритет).<br />
+              <span className="text-amber-400">● Ежедневный</span> — оперативные данные. Замещаются еженедельным за тот же период.<br />
+              <span className="text-zinc-400">● API WB</span> — данные из API. Замещаются при наличии детализированного отчёта.
+            </Hint>
+          </div>
+          <p className="text-sm text-zinc-400 mt-0.5">Строки из отчётов WB с автоматическим выбором лучшего источника</p>
+        </div>
+        <SmartDetailTable />
+      </section>
+
       <div className="border-t border-border" />
       <FinanceSection />
+      <div className="border-t border-border" />
+      <WeeklySection />
     </div>
   )
 }
