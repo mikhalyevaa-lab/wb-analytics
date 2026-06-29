@@ -32,21 +32,22 @@ export async function GET(req: NextRequest) {
 
   const adb = adminDb()
 
-  const [financeRes, salesRes, adRes, stocksRes, dirRes, prodRes, funnelRes] = await Promise.all([
-    // wb_finance — для логистики, штрафов, доп.выплат (еженедельные данные)
+  const [financeRes, salesRes, adRes, stocksRes, funnelRes] = await Promise.all([
+    // wb_finance — только штрафы и доп.выплаты
     adb.from('wb_finance')
-      .select('date_from, date_to, doc_type_name, ppvz_for_pay, quantity, nm_id, delivery_rub, penalty, additional_payment')
+      .select('date_from, date_to, penalty, additional_payment')
       .in('store_id', storeIds)
       .gte('date_from', dateFrom)
       .lte('date_to', dateTo)
       .limit(200000),
 
-    // wb_sales — ежедневные продажи с точными датами
+    // wb_sales — ежедневные выкупы (is_realization=true)
     adb.from('wb_sales')
-      .select('date, is_realization, for_pay, finished_price, nm_id')
+      .select('date, is_realization')
       .in('store_id', storeIds)
       .gte('date', dateFrom)
       .lte('date', dateTo + 'T23:59:59')
+      .eq('is_realization', true)
       .limit(200000),
 
     // Реклама по дням
@@ -57,23 +58,14 @@ export async function GET(req: NextRequest) {
       .lte('date', dateTo)
       .limit(50000),
 
-    // Текущие остатки — только последняя дата, суммируем quantity по всем складам
+    // Текущие остатки — сумма quantity по всем складам на последнюю дату снапшота
     adb.from('wb_stocks')
-      .select('nm_id, quantity, date')
+      .select('quantity, date')
       .in('store_id', storeIds)
       .order('date', { ascending: false })
       .limit(50000),
 
-    // Directory для мультипликаторов
-    adb.from('directory').select('doc_type_name, multiplier'),
-
-    // Продукты для себестоимости
-    adb.from('products')
-      .select('nm_id, cost_price')
-      .in('store_id', storeIds)
-      .limit(5000),
-
-    // Воронка — заказы, корзина и переходы по дням (основной источник заказов)
+    // Воронка — заказы и переходы по дням (основной источник заказов)
     adb.from('wb_funnel')
       .select('date, open_count, order_count, order_sum')
       .in('store_id', storeIds)
@@ -82,31 +74,19 @@ export async function GET(req: NextRequest) {
       .limit(200000),
   ])
 
-  type FinRow     = { date_from: string | null; date_to: string | null; doc_type_name: string | null; ppvz_for_pay: number | null; quantity: number | null; nm_id: number | null; delivery_rub: number | null; penalty: number | null; additional_payment: number | null }
-  type SaleRow    = { date: string | null; is_realization: boolean | null; for_pay: number | null; finished_price: number | null; nm_id: number | null }
+  type FinRow     = { date_from: string | null; date_to: string | null; penalty: number | null; additional_payment: number | null }
+  type SaleRow    = { date: string | null; is_realization: boolean | null }
   type AdRow      = { date: string | null; spend: number | null }
-  type StockRow   = { nm_id: number; quantity: number | null; date: string | null }
-  type DirRow     = { doc_type_name: string; multiplier: number }
-  type ProdRow    = { nm_id: number | null; cost_price: number | null }
+  type StockRow   = { quantity: number | null; date: string | null }
   type FunnelRow  = { date: string | null; open_count: number | null; order_count: number | null; order_sum: number | null }
 
   const finRows    = (financeRes.data ?? []) as FinRow[]
   const salesRows  = (salesRes.data   ?? []) as SaleRow[]
   const adRows     = (adRes.data      ?? []) as AdRow[]
   const stocks     = (stocksRes.data  ?? []) as StockRow[]
-  const dirRows    = (dirRes.data     ?? []) as DirRow[]
-  const prodRows   = (prodRes.data    ?? []) as ProdRow[]
   const funnelRows = (funnelRes.data  ?? []) as FunnelRow[]
 
-  // Мультипликаторы
-  const multMap = new Map<string, number>()
-  for (const d of dirRows) multMap.set(d.doc_type_name, d.multiplier)
-
-  // Себестоимость
-  const costMap = new Map<number, number>()
-  for (const p of prodRows) if (p.nm_id && p.cost_price) costMap.set(p.nm_id, p.cost_price)
-
-  // Остатки ВБ — берём только строки с последней датой снапшота, суммируем quantity
+  // Остаток ВБ — сумма quantity по всем складам на последнюю дату снапшота
   const toStr = (d: unknown) => typeof d === 'string' ? d.slice(0, 10) : d instanceof Date ? d.toISOString().slice(0, 10) : ''
   const latestDate = stocks.reduce((max, r) => { const s = toStr(r.date); return s > max ? s : max }, '')
   const totalStock = stocks
@@ -130,10 +110,6 @@ export async function GET(req: NextRequest) {
     orders_count: number
     orders_sum: number
     sales_count: number
-    sales_revenue: number
-    returns_count: number
-    returns_amount: number
-    logistics: number
     penalties: number
     additional: number
     ad_spend: number
@@ -143,23 +119,20 @@ export async function GET(req: NextRequest) {
 
   const emptyDay = (): DayAcc => ({
     orders_count: 0, orders_sum: 0,
-    sales_count: 0, sales_revenue: 0,
-    returns_count: 0, returns_amount: 0,
-    logistics: 0, penalties: 0, additional: 0, ad_spend: 0,
+    sales_count: 0,
+    penalties: 0, additional: 0, ad_spend: 0,
   })
 
-  // Продажи (выкупы) — из wb_sales
+  // Продажи (выкупы) — из wb_sales (только is_realization=true, фильтр в запросе)
   for (const s of salesRows) {
-    if (s.is_realization === false) continue
     const day = s.date?.slice(0, 10)
     if (!day) continue
     const acc = dayMap.get(day) ?? emptyDay()
     acc.sales_count++
-    acc.sales_revenue += s.for_pay ?? s.finished_price ?? 0
     dayMap.set(day, acc)
   }
 
-  // wb_finance — только логистика, штрафы, доп.выплаты
+  // wb_finance — штрафы и доп.выплаты (логистика убрана — не отображается)
   // Данные еженедельные: распределяем равномерно по дням периода (date_from → date_to)
   for (const r of finRows) {
     const wStart = r.date_from?.slice(0, 10)
@@ -183,7 +156,6 @@ export async function GET(req: NextRequest) {
 
     for (const day of weekDays) {
       const acc = dayMap.get(day) ?? emptyDay()
-      acc.logistics  += Math.abs(r.delivery_rub ?? 0) * frac
       acc.penalties  += Math.abs(r.penalty ?? 0) * frac
       acc.additional += (r.additional_payment ?? 0) * frac
       dayMap.set(day, acc)
@@ -209,8 +181,6 @@ export async function GET(req: NextRequest) {
     const ordersCount = funnel.order_count
     const ordersSum   = funnel.order_sum
 
-    const grossProfit = acc.sales_revenue - acc.logistics - acc.penalties + acc.additional
-
     // ДРР = расход на рекламу / сумма заказов * 100
     const drr = ordersSum > 0 ? (acc.ad_spend / ordersSum) * 100 : null
 
@@ -224,13 +194,7 @@ export async function GET(req: NextRequest) {
       orders_count:    ordersCount,
       orders_sum:      Math.round(ordersSum),
       sales_count:     Math.round(acc.sales_count),
-      sales_revenue:   Math.round(acc.sales_revenue),
-      returns_count:   Math.round(acc.returns_count),
-      returns_amount:  Math.round(acc.returns_amount),
-      logistics:       Math.round(acc.logistics),
-      penalties:       Math.round(acc.penalties),
       ad_spend:        Math.round(acc.ad_spend),
-      gross_profit:    Math.round(grossProfit),
       drr:             drr !== null ? Math.round(drr * 10) / 10 : null,
       cr_order_sale:   crOrderToSale !== null ? Math.round(crOrderToSale * 10) / 10 : null,
       avg_order_price: ordersCount > 0 ? Math.round(ordersSum / ordersCount) : null,
@@ -241,15 +205,11 @@ export async function GET(req: NextRequest) {
 
   // Итоги
   const totals = byDate.reduce((acc, d) => ({
-    orders_count:   acc.orders_count   + d.orders_count,
-    orders_sum:     acc.orders_sum     + d.orders_sum,
-    sales_count:    acc.sales_count    + d.sales_count,
-    sales_revenue:  acc.sales_revenue  + d.sales_revenue,
-    returns_amount: acc.returns_amount + d.returns_amount,
-    logistics:      acc.logistics      + d.logistics,
-    ad_spend:       acc.ad_spend       + d.ad_spend,
-    gross_profit:   acc.gross_profit   + d.gross_profit,
-  }), { orders_count: 0, orders_sum: 0, sales_count: 0, sales_revenue: 0, returns_amount: 0, logistics: 0, ad_spend: 0, gross_profit: 0 })
+    orders_count: acc.orders_count + d.orders_count,
+    orders_sum:   acc.orders_sum   + d.orders_sum,
+    sales_count:  acc.sales_count  + d.sales_count,
+    ad_spend:     acc.ad_spend     + d.ad_spend,
+  }), { orders_count: 0, orders_sum: 0, sales_count: 0, ad_spend: 0 })
 
   // Время последней синхронизации воронки
   const lastOrdersSync = funnelRows.reduce((max, r) => {

@@ -8,13 +8,7 @@ type DayData = {
   orders_count: number
   orders_sum: number
   sales_count: number
-  sales_revenue: number
-  returns_count: number
-  returns_amount: number
-  logistics: number
-  penalties: number
   ad_spend: number
-  gross_profit: number
   drr: number | null
   cr_order_sale: number | null
   avg_order_price: number | null
@@ -26,11 +20,7 @@ type Totals = {
   orders_count: number
   orders_sum: number
   sales_count: number
-  sales_revenue: number
-  returns_amount: number
-  logistics: number
   ad_spend: number
-  gross_profit: number
 }
 
 type ApiResponse = {
@@ -43,7 +33,7 @@ type ApiResponse = {
   lastAdSync: string | null
 }
 
-const ROWS: { key: keyof DayData | 'avg_order_price_budget' | 'potential_profit_pct'; label: string; format: 'money' | 'count' | 'pct' | 'text' | 'placeholder'; full?: boolean; hint?: string }[] = [
+const ROWS: { key: keyof DayData | 'avg_order_price_budget' | 'potential_profit_pct' | 'gross_profit'; label: string; format: 'money' | 'count' | 'pct' | 'text' | 'placeholder'; full?: boolean; hint?: string }[] = [
   { key: 'orders_sum',               label: 'Сумма по заказам ₽',   format: 'money',       full: true,  hint: 'Суммарная стоимость заказов по дню. Источник: Воронка (wb_funnel).'                              },
   { key: 'gross_profit',             label: 'Потенц. ЧП',            format: 'placeholder',              hint: 'В разработке. Плановая чистая прибыль с учётом себестоимости и комиссий.'                       },
   { key: 'potential_profit_pct',     label: '% потенц. прибыли',     format: 'placeholder',              hint: 'В разработке. Доля чистой прибыли от суммы заказов.'                                            },
@@ -52,7 +42,7 @@ const ROWS: { key: keyof DayData | 'avg_order_price_budget' | 'potential_profit_
   { key: 'open_count',               label: 'Переходов',             format: 'count',                    hint: 'Число переходов в карточку товара из рекламы. Источник: Реклама (wb_funnel.open_count).'         },
   { key: 'ad_spend',                 label: 'Бюджет ₽',              format: 'money',       full: true,  hint: 'Расходы на рекламу за день. Источник: Реклама (wb_ad_spend).'                                   },
   { key: 'drr',                      label: 'ДРР %',                 format: 'pct',                      hint: 'Доля рекламных расходов от суммы заказов. ДРР = Бюджет / Сумма заказов × 100.'                  },
-  { key: 'avg_order_price_budget',   label: 'Цена заказа (Б/З)',     format: 'money',                    hint: 'Средняя стоимость привлечения одного заказа через рекламу. = Бюджет / Заказов.'                  },
+  { key: 'avg_order_price_budget',   label: 'Цена заказа',           format: 'money',                    hint: 'Средняя стоимость привлечения одного заказа через рекламу. = Бюджет / Заказов.'                  },
   { key: 'cost_per_click',           label: 'Цена перехода',         format: 'money',                    hint: 'Средняя стоимость одного перехода в карточку. = Бюджет / Переходов.'                            },
   { key: 'cr_order_sale',            label: 'CR% заказ→продажа',     format: 'pct',                      hint: 'Конверсия из заказа в выкуп. = Продажи / Заказов × 100. Норма для WB: 50–80%.'                  },
 ]
@@ -66,10 +56,10 @@ function fmt(val: number | null, format: string, full = false): string {
       if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'М'
       if (Math.abs(v) >= 1_000)    return (v / 1_000).toFixed(0) + 'к'
     }
-    return v.toLocaleString('ru')
+    return v.toLocaleString('ru', { maximumFractionDigits: 0 })
   }
   if (format === 'pct') return val.toFixed(1) + '%'
-  return Math.round(val).toLocaleString('ru')
+  return Math.round(val).toLocaleString('ru', { maximumFractionDigits: 0 })
 }
 
 function drrColor(drr: number | null): string {
@@ -209,19 +199,25 @@ export function RnpMatrix() {
             money: true,
             hint: <><strong>Бюджет рекламных кампаний</strong><br /><br />Суммарные расходы на рекламу за период. Источник: метод Реклама (wb_ad_spend). WB хранит данные за последние 90 дней.</>,
           },
+          {
+            label: 'Остаток ВБ',
+            val: data.stockTotal,
+            money: false,
+            hint: <><strong>Остаток ВБ</strong><br /><br />Суммарное количество единиц товара на всех складах Wildberries на текущий момент. Источник: wb_stocks (последний снапшот).</>,
+          },
         ] as Array<{ label: string; val: number | null; money: boolean; hint: React.ReactNode }>
         return (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {widgets.map(c => (
               <div key={c.label} className="bg-card rounded-xl border border-border p-3">
                 <div className="flex items-center gap-1 mb-1">
                   <p className="text-xs text-muted-foreground">{c.label}</p>
                   <Hint width={280}>{c.hint}</Hint>
                 </div>
-                <p className="text-xl font-bold tabular-nums">
+                <p className="text-2xl font-bold tabular-nums">
                   {c.val == null ? '—'
                     : c.money ? fmt(c.val, 'money', true) + ' ₽'
-                    : Math.round(c.val).toLocaleString('ru')}
+                    : Math.round(c.val).toLocaleString('ru', { maximumFractionDigits: 0 })}
                 </p>
               </div>
             ))}
@@ -236,7 +232,7 @@ export function RnpMatrix() {
       {!loading && dates.length > 0 && (
         <div className="rounded-xl border border-border overflow-hidden bg-card">
           <div ref={scrollRef} className="overflow-x-auto">
-            <table className="text-sm border-collapse min-w-max">
+            <table className="text-base border-collapse min-w-max">
               <thead>
                 <tr className="border-b border-border">
                   <th className="sticky left-0 z-10 bg-card w-36 min-w-36 text-left px-3 py-2 font-semibold text-muted-foreground border-r border-border">
@@ -298,7 +294,7 @@ export function RnpMatrix() {
                       return (
                         <td
                           key={d.date}
-                          className={`text-center px-1 py-1.5 border-r border-border/30 tabular-nums text-sm font-medium ${
+                          className={`text-center px-1 py-1.5 border-r border-border/30 tabular-nums text-base font-medium ${
                             isToday ? 'bg-white/5' : isWeekend ? 'bg-orange-500/5' : ''
                           } ${isDrr ? drrColor(val) : ''}`}
                         >
@@ -307,7 +303,7 @@ export function RnpMatrix() {
                       )
                     })}
                     {/* Итого */}
-                    <td className="text-center px-1 py-1.5 font-semibold border-l border-border bg-zinc-800/30 tabular-nums text-sm">
+                    <td className="text-center px-1 py-1.5 font-semibold border-l border-border bg-zinc-800/30 tabular-nums text-base">
                       {totals && (() => {
                         if (row.format === 'placeholder') return '—'
                         switch (row.key) {
