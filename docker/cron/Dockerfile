@@ -1,8 +1,13 @@
-FROM alpine:3.19
+FROM node:22-alpine
+WORKDIR /app
 
-RUN apk add --no-cache curl
+# Устанавливаем все зависимости (включая devDeps для tsx)
+COPY package.json package-lock.json ./
+RUN npm ci
 
-COPY run.sh /run.sh
-RUN chmod +x /run.sh
+# Копируем исходники нужные для крона
+COPY tsconfig.json ./
+COPY src ./src
+COPY cron ./cron
 
-CMD ["/run.sh"]
+CMD ["npx", "tsx", "cron/runner.ts"]
