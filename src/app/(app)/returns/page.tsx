@@ -6,6 +6,7 @@ import { ReturnsTable }    from '@/components/returns/returns-table'
 import { BuyoutTrend }     from '@/components/returns/buyout-trend'
 import { BuyoutRadar }     from '@/components/returns/buyout-radar'
 import { Card, CardContent } from '@/components/ui/card'
+import { PageHeader }      from '@/components/ui/page-header'
 
 interface Summary {
   returns_28d: number
@@ -56,13 +57,11 @@ export default function ReturnsPage() {
 
   return (
     <div className="space-y-8 p-6 max-w-[1400px]">
-      {/* Заголовок */}
-      <div>
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Возвраты</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Радар выкупа · худшие артикулы · тренд 28д / 84д · данные из wb_sales
-        </p>
-      </div>
+      <PageHeader
+        picto="returns"
+        title="Возвраты"
+        subtitle="Радар выкупа · худшие артикулы · тренд 28д / 84д · данные из wb_sales"
+      />
 
       {/* KPI */}
       <ReturnsKpiCards data={summary} loading={loading} />

@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/auth-server'
 import { redirect } from 'next/navigation'
 import { ImportWizard } from '@/components/import/import-wizard'
 import { WeeklyReportUpload } from '@/components/import/weekly-report-upload'
+import { PageHeader } from '@/components/ui/page-header'
 
 export default async function ImportPage() {
   const session = await getServerSession()
@@ -11,12 +12,11 @@ export default async function ImportPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Импорт данных</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Загрузка отчётов из файлов WB. Дубликаты пропускаются автоматически.
-        </p>
-      </div>
+      <PageHeader
+        picto="import"
+        title="Импорт данных"
+        subtitle="Загрузка отчётов из файлов WB. Дубликаты пропускаются автоматически."
+      />
 
       {/* ── Раздел 1: Список отчётов ── */}
       <Section

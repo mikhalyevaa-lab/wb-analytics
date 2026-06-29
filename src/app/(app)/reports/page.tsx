@@ -6,6 +6,7 @@ import { Hint } from '@/components/ui/hint'
 import Link from 'next/link'
 import { CrossCheckBlock } from '@/components/reports/crosscheck-block'
 import { SmartDetailTable } from '@/components/reports/smart-detail-table'
+import { PageHeader } from '@/components/ui/page-header'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -556,6 +557,12 @@ function FinanceSection() {
 export default function ReportsPage() {
   return (
     <div className="p-6 max-w-[1400px] space-y-10">
+      <PageHeader
+        picto="reports"
+        title="Финансовые отчёты"
+        subtitle="Детализация операций · умный приоритет нед / дн / api · сверка по периодам"
+      />
+
       {/* Умная таблица: нед/дн/api с приоритетом */}
       <section className="space-y-4">
         <div>
