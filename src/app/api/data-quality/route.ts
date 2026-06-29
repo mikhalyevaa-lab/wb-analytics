@@ -17,6 +17,7 @@ const STALE_AFTER: Record<string, number> = {
   funnel:      25,
   products:    25,
   advertising: 25,
+  incomes:     25,
 }
 
 const LABELS: Record<string, string> = {
@@ -30,6 +31,7 @@ const LABELS: Record<string, string> = {
   funnel:      'Воронка',
   products:    'Товары',
   advertising: 'Реклама',
+  incomes:     'Поставки',
 }
 
 export interface DataQualityItem {

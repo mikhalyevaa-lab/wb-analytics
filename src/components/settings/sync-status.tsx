@@ -35,6 +35,7 @@ const SYNC_ENDPOINTS: Record<string, { url: string; body?: object; label: string
   tariffs:     { url: '/api/sync/tariffs',      body: {},                         label: 'Тарифы' },
   commissions: { url: '/api/sync/commissions',  body: {},                         label: 'Комиссии' },
   funnel:      { url: '/api/sync/funnel-initial', body: {},                       label: 'Воронка' },
+  incomes:     { url: '/api/sync/initial',      body: { methods: ['incomes'] }, label: 'Поставки' },
   // advertising обрабатывается отдельно (требует dateFrom / dateTo)
 }
 
