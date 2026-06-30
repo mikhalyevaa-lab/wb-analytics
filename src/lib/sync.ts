@@ -66,15 +66,16 @@ async function logSync(
     finished_at: new Date().toISOString(),
   }).eq('store_id', storeId).eq('method', method).eq('status', 'running')
 
-  const { data: logRow } = await db
+  // .single() в compat-клиенте возвращает массив, берём первый элемент явно
+  const { data: insertResult } = await db
     .from('sync_log')
     .insert({ store_id: storeId, method, status: 'running' })
     .select('id')
-    .single()
+  const logId = (Array.isArray(insertResult) ? insertResult[0]?.id : (insertResult as { id?: number } | null)?.id) ?? null
 
   const result = await fn()
 
-  if (logRow?.id) {
+  if (logId) {
     await db.from('sync_log').update({
       finished_at:  new Date().toISOString(),
       rows_count:   result.count,
@@ -83,7 +84,7 @@ async function logSync(
       duration_ms:  Date.now() - startMs,
       // dateFrom — дата начала дельта-окна (для видимости в sync_log)
       ...(result.dateFrom ? { date_from: result.dateFrom } : {}),
-    }).eq('id', logRow.id)
+    }).eq('id', logId)
   }
   return result
 }
