@@ -68,7 +68,17 @@ export async function GET() {
   const day28 = new Date(today); day28.setDate(today.getDate() - 28)
   const day28Str = day28.toISOString().split('T')[0]
 
-  const [productsRes, stocksRes, ordersRes, finRes, incomesRes] = await Promise.all([
+  // Сначала получаем ID активных поставок (в пути: статусы 2,3,4,6)
+  const { data: activeSupplies } = await adb
+    .from('wb_supplies')
+    .select('supply_id')
+    .in('store_id', storeIds)
+    .in('status_id', [2, 3, 4, 6])
+    .not('supply_id', 'is', null)
+
+  const activeSupplyIds = (activeSupplies ?? []).map((s: { supply_id: number }) => s.supply_id).filter(Boolean)
+
+  const [productsRes, stocksRes, ordersRes, finRes, transitGoodsRes] = await Promise.all([
     // Все продукты со скоростью продаж
     adb.from('products')
       .select('nm_id, vendor_code, title, brand, photo_url, cost_price, current_stock, avg_orders_per_day, subject_name')
@@ -96,24 +106,27 @@ export async function GET() {
       .gte('date', day28Str)
       .limit(200000),
 
-    // Поставки в пути (статус = 1 = в пути)
-    adb.from('wb_incomes')
-      .select('nm_id, quantity, status')
-      .in('store_id', storeIds)
-      .limit(50000),
+    // Товары в активных поставках FBW (новый API)
+    activeSupplyIds.length
+      ? adb.from('wb_supply_goods')
+          .select('nm_id, quantity')
+          .in('store_id', storeIds)
+          .in('supply_id', activeSupplyIds)
+          .limit(50000)
+      : Promise.resolve({ data: [] }),
   ])
 
-  type ProductRow = { nm_id: number | null; vendor_code: string | null; title: string | null; brand: string | null; photo_url: string | null; cost_price: number | null; current_stock: number | null; avg_orders_per_day: number | null; subject_name: string | null }
-  type StockRow   = { nm_id: number | null; warehouse: string | null; quantity_full: number | null; quantity: number | null; tech_size: string | null }
-  type OrderRow   = { nm_id: number | null; date: string | null; is_cancel: boolean | null }
-  type FinRow     = { nm_id: number | null; cost: number | null }
-  type IncomeRow  = { nm_id: number | null; quantity: number | null; status: string | null }
+  type ProductRow  = { nm_id: number | null; vendor_code: string | null; title: string | null; brand: string | null; photo_url: string | null; cost_price: number | null; current_stock: number | null; avg_orders_per_day: number | null; subject_name: string | null }
+  type StockRow    = { nm_id: number | null; warehouse: string | null; quantity_full: number | null; quantity: number | null; tech_size: string | null }
+  type OrderRow    = { nm_id: number | null; date: string | null; is_cancel: boolean | null }
+  type FinRow      = { nm_id: number | null; cost: number | null }
+  type TransitRow  = { nm_id: number | null; quantity: number | null }
 
-  const products = (productsRes.data ?? []) as ProductRow[]
-  const stocks   = (stocksRes.data   ?? []) as StockRow[]
-  const orders   = (ordersRes.data   ?? []) as OrderRow[]
-  const finRows  = (finRes.data      ?? []) as FinRow[]
-  const incomes  = (incomesRes.data  ?? []) as IncomeRow[]
+  const products    = (productsRes.data     ?? []) as ProductRow[]
+  const stocks      = (stocksRes.data       ?? []) as StockRow[]
+  const orders      = (ordersRes.data       ?? []) as OrderRow[]
+  const finRows     = (finRes.data          ?? []) as FinRow[]
+  const transitRows = (transitGoodsRes.data ?? []) as TransitRow[]
 
   // Заказы за 28д по nm_id
   const orders28 = new Map<number, number>()
@@ -121,11 +134,11 @@ export async function GET() {
     if (o.nm_id) orders28.set(o.nm_id, (orders28.get(o.nm_id) ?? 0) + 1)
   }
 
-  // В пути по nm_id (статус не "closed")
+  // В пути по nm_id — из wb_supply_goods для активных поставок (statusID 2,3,4,6)
   const inTransit = new Map<number, number>()
-  for (const i of incomes) {
-    if (i.nm_id && i.status !== 'closed' && i.status !== 'отменён') {
-      inTransit.set(i.nm_id, (inTransit.get(i.nm_id) ?? 0) + (i.quantity ?? 0))
+  for (const r of transitRows) {
+    if (r.nm_id) {
+      inTransit.set(r.nm_id, (inTransit.get(r.nm_id) ?? 0) + (r.quantity ?? 0))
     }
   }
 

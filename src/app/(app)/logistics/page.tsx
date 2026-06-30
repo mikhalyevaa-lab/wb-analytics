@@ -5,6 +5,7 @@ import { getServerSession } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 import { IrpWidget } from '@/components/logistics/irp-widget'
 import { LogisticsCosts } from '@/components/logistics/logistics-costs'
+import { LogisticsCheck } from '@/components/logistics/logistics-check'
 import { PageHeader } from '@/components/ui/page-header'
 
 export const dynamic = 'force-dynamic'
@@ -143,6 +144,8 @@ export default async function LogisticsPage() {
           topRegions,
         }}
       />
+
+      <LogisticsCheck />
     </div>
   )
 }

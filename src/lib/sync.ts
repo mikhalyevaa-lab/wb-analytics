@@ -56,7 +56,7 @@ async function logSync(
   storeId: string,
   method: string,
   db: SupabaseAdminClient,
-  fn: () => Promise<{ count: number; error?: string }>
+  fn: () => Promise<{ count: number; error?: string; dateFrom?: string }>
 ): Promise<{ count: number; error?: string }> {
   const startMs = Date.now()
   // Помечаем зависшие 'running' записи как interrupted перед новым запуском
@@ -81,9 +81,42 @@ async function logSync(
       status:       result.error ? 'error' : 'ok',
       error:        result.error ?? null,
       duration_ms:  Date.now() - startMs,
+      // dateFrom — дата начала дельта-окна (для видимости в sync_log)
+      ...(result.dateFrom ? { date_from: result.dateFrom } : {}),
     }).eq('id', logRow.id)
   }
   return result
+}
+
+// ---------- Дельта-синк: дата начала окна ----------
+
+/**
+ * Возвращает дату начала дельта-окна для таблицы:
+ * MAX(last_change_date) минус 10-минутный буфер на гонку состояний.
+ * Если данных нет — фолбэк на 7 дней назад (первый синк).
+ */
+async function getDeltaFrom(
+  storeId: string,
+  table: 'wb_orders' | 'wb_sales',
+  db: SupabaseAdminClient
+): Promise<{ wbDate: string; isoDate: string }> {
+  const { data } = await db
+    .from(table)
+    .select('last_change_date')
+    .eq('store_id', storeId)
+    .not('last_change_date', 'is', null)
+    .order('last_change_date', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (data?.last_change_date) {
+    const d = new Date(data.last_change_date)
+    d.setMinutes(d.getMinutes() - 10) // буфер 10 мин
+    return { wbDate: formatDateForWB(d), isoDate: d.toISOString().split('T')[0] }
+  }
+  // Первый синк — грузим 7 дней
+  const fallback = daysAgo(7)
+  return { wbDate: formatDateForWB(fallback), isoDate: fallback.toISOString().split('T')[0] }
 }
 
 // ---------- Главная функция ----------
@@ -97,12 +130,19 @@ export async function syncStore(store: Store): Promise<{
   const wb = createWBClient(store.wb_token)
   const results: Record<string, { count: number; error?: string }> = {}
 
-  // Заказы, продажи — каждый запуск (каждые 2 часа), дельта за 7 дней
-  await syncOrders(store, wb, db, results)
+  // Заказы, продажи — каждый запуск (каждые 2 часа), дельта от MAX(last_change_date)
+  results.orders = await logSync(store.id, 'orders', db, () => syncOrders(store, wb, db))
   await sleep(1000)
-  await syncSales(store, wb, db, results)
+  results.sales = await logSync(store.id, 'sales', db, () => syncSales(store, wb, db))
   await sleep(1000)
-  // syncIncomes пропущен — WB удалил эндпоинт /api/v1/supplier/incomes
+
+  // Поставки FBW — раз в 6 часов (новый API supplies-api.wildberries.ru)
+  if (await shouldSync(store.id, 'supplies', 6, db)) {
+    await syncSupplies(store, wb, db, results)
+    await sleep(1000)
+  } else {
+    console.log(`[sync] supplies: throttled`)
+  }
 
   // Финансы — раз в 24 часа (WB финализирует данные раз в сутки)
   if (await shouldSync(store.id, 'finance', 24, db)) {
@@ -191,12 +231,13 @@ async function syncOrders(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
   db: SupabaseAdminClient,
-  results: Record<string, { count: number; error?: string }>
-) {
+): Promise<{ count: number; error?: string; dateFrom?: string }> {
+  // Дельта-окно: от MAX(last_change_date) − 10 мин, или 7 дней при первом синке
+  const { wbDate, isoDate } = await getDeltaFrom(store.id, 'wb_orders', db)
+  console.log(`[sync] orders delta from: ${isoDate}`)
   try {
-    const dateFrom = formatDateForWB(daysAgo(7))
-    const orders = await wb.getOrders(dateFrom, 0)
-    if (!orders?.length) { results.orders = { count: 0 }; return }
+    const orders = await wb.getOrders(wbDate, 0)
+    if (!orders?.length) return { count: 0, dateFrom: isoDate }
 
     const rows = orders.map(o => ({
       store_id: store.id,
@@ -235,11 +276,11 @@ async function syncOrders(
       if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
-    results.orders = { count: total }
+    return { count: total, dateFrom: isoDate }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[sync] orders error:', msg)
-    results.orders = { count: 0, error: msg }
+    return { count: 0, error: msg, dateFrom: isoDate }
   }
 }
 
@@ -249,12 +290,13 @@ async function syncSales(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
   db: SupabaseAdminClient,
-  results: Record<string, { count: number; error?: string }>
-) {
+): Promise<{ count: number; error?: string; dateFrom?: string }> {
+  // Дельта-окно: от MAX(last_change_date) − 10 мин, или 7 дней при первом синке
+  const { wbDate, isoDate } = await getDeltaFrom(store.id, 'wb_sales', db)
+  console.log(`[sync] sales delta from: ${isoDate}`)
   try {
-    const dateFrom = formatDateForWB(daysAgo(7))
-    const sales = await wb.getSales(dateFrom, 0)
-    if (!sales?.length) { results.sales = { count: 0 }; return }
+    const sales = await wb.getSales(wbDate, 0)
+    if (!sales?.length) return { count: 0, dateFrom: isoDate }
 
     const rows = sales.map(s => ({
       store_id: store.id,
@@ -287,11 +329,11 @@ async function syncSales(
       if (error) throw new Error(error.message ?? JSON.stringify(error))
       total += count || chunk.length
     }
-    results.sales = { count: total }
+    return { count: total, dateFrom: isoDate }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[sync] sales error:', msg)
-    results.sales = { count: 0, error: msg }
+    return { count: 0, error: msg, dateFrom: isoDate }
   }
 }
 
@@ -402,49 +444,87 @@ async function syncFinance(
   }
 }
 
-// ---------- Поставки ----------
+// ---------- Поставки FBW ----------
 
-async function syncIncomes(
+// Статусы "в пути" (не принято): 2=запланировано, 3=отгрузка разрешена, 4=идёт приёмка, 6=отгружено
+const IN_TRANSIT_STATUSES = [2, 3, 4, 6]
+
+async function syncSupplies(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
   db: SupabaseAdminClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   try {
-    const dateFrom = formatDateForWB(daysAgo(30))
-    const incomes = await wb.getIncomes(dateFrom)
-    if (!incomes?.length) { results.incomes = { count: 0 }; return }
+    // Шаг 1: последние 1000 поставок всех статусов (чтобы обновлять статусы ранее активных)
+    const supplies = await wb.getSupplies()
+    if (!supplies?.length) { results.supplies = { count: 0 }; return }
 
-    const rows = incomes.map(i => ({
-      store_id: store.id,
-      income_id: i.incomeId,
-      date: i.date,
-      last_change_date: i.lastChangeDate,
-      supplier_article: i.supplierArticle,
-      tech_size: i.techSize,
-      barcode: i.barcode,
-      quantity: i.quantity,
-      total_price: i.totalPrice,
-      date_close: i.dateClose || null,
-      warehouse_name: i.warehouseName,
-      nm_id: i.nmId,
-      status: i.status,
+    // Шаг 2: сохраняем заголовки — upsert обновит statusID для изменившихся поставок
+    const supplyRows = supplies.map(s => ({
+      store_id:         store.id,
+      preorder_id:      s.preorderID,
+      supply_id:        s.supplyID ?? null,
+      status_id:        s.statusID,
+      create_date:      s.createDate  ?? null,
+      supply_date:      s.supplyDate  ?? null,
+      fact_date:        s.factDate    ?? null,
+      updated_date:     s.updatedDate ?? null,
+      box_type_id:      s.boxTypeID   ?? null,
+      is_box_on_pallet: s.isBoxOnPallet ?? null,
     }))
 
-    const chunks = chunkArray(rows, 500)
-    let total = 0
-    for (const chunk of chunks) {
-      const { error, count } = await db
-        .from('wb_incomes')
-        .upsert(chunk, { onConflict: 'store_id,income_id', ignoreDuplicates: true })
-      if (error) throw new Error(error.message ?? JSON.stringify(error))
-      total += count || chunk.length
+    const { error: supErr } = await db
+      .from('wb_supplies')
+      .upsert(supplyRows, { onConflict: 'store_id,preorder_id' })
+    if (supErr) throw new Error(supErr.message ?? JSON.stringify(supErr))
+
+    // Шаг 3: товары для поставок "в пути" (у которых есть supplyID)
+    const activeSupplies = supplies.filter(
+      s => s.supplyID !== null && IN_TRANSIT_STATUSES.includes(s.statusID)
+    )
+
+    let goodsTotal = 0
+    for (const supply of activeSupplies) {
+      const goods = await wb.getSupplyGoods(supply.supplyID!)
+      if (!goods?.length) continue
+
+      const goodsRows = goods.map(g => ({
+        store_id:     store.id,
+        supply_id:    supply.supplyID!,
+        nm_id:        g.nmID,
+        vendor_code:  g.vendorCode || null,
+        barcode:      g.barcode    || null,
+        tech_size:    g.techSize   || '',
+        quantity:     g.quantity,
+        accepted_qty: g.acceptedQuantity,
+      }))
+
+      const { error: gErr } = await db
+        .from('wb_supply_goods')
+        .upsert(goodsRows, { onConflict: 'store_id,supply_id,nm_id,tech_size' })
+      if (gErr) throw new Error(gErr.message ?? JSON.stringify(gErr))
+      goodsTotal += goodsRows.length
+
+      await sleep(300) // пауза между запросами на товары
     }
-    results.incomes = { count: total }
+
+    // Шаг 4: удаляем товары для поставок, которые теперь имеют статус "принято" (5)
+    const completedIds = supplies
+      .filter(s => s.supplyID !== null && s.statusID === 5)
+      .map(s => s.supplyID!)
+    if (completedIds.length) {
+      await db.from('wb_supply_goods')
+        .delete()
+        .in('supply_id', completedIds)
+        .eq('store_id', store.id)
+    }
+
+    results.supplies = { count: supplies.length + goodsTotal }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error('[sync] incomes error:', msg)
-    results.incomes = { count: 0, error: msg }
+    console.error('[sync] supplies error:', msg)
+    results.supplies = { count: 0, error: msg }
   }
 }
 

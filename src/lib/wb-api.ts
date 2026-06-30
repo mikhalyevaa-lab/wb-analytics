@@ -8,6 +8,7 @@ const WB_CONTENT_URL   = 'https://content-api.wildberries.ru'
 const WB_ADV_URL       = 'https://advert-api.wildberries.ru'
 const WB_ANALYTICS_URL = 'https://seller-analytics-api.wildberries.ru'
 const WB_COMMON_URL    = 'https://common-api.wildberries.ru'
+const WB_SUPPLIES_URL  = 'https://supplies-api.wildberries.ru'
 
 // ---------- Типы данных ----------
 
@@ -136,6 +137,32 @@ export interface WBIncome {
   warehouseName: string
   nmId: number
   status: string
+}
+
+// Поставки FBW — новый API (supplies-api.wildberries.ru)
+// statusID: 1=не запланировано 2=запланировано 3=отгрузка разрешена 4=идёт приёмка 5=принято 6=отгружено
+export interface WBSupplyItem {
+  phone: string
+  supplyID: number | null
+  preorderID: number
+  createDate: string | null
+  supplyDate: string | null
+  factDate: string | null
+  updatedDate: string | null
+  statusID: number
+  boxTypeID: number
+  isBoxOnPallet?: boolean
+}
+
+export interface WBSupplyGood {
+  barcode: string
+  vendorCode: string
+  nmID: number
+  techSize: string
+  quantity: number
+  acceptedQuantity: number
+  unloadingQuantity: number
+  readyForSaleQuantity: number
 }
 
 export interface WBAdCampaign {
@@ -549,10 +576,37 @@ class WBApiClient {
 
   /**
    * Получить поставки на склады WB
+   * @deprecated WB удалил этот endpoint. Используй getSupplies() / getSupplyGoods().
    */
   async getIncomes(dateFrom: string): Promise<WBIncome[]> {
     const url = `${WB_STATS_URL}/api/v1/supplier/incomes?dateFrom=${dateFrom}`
     return this.fetch<WBIncome[]>(url)
+  }
+
+  /**
+   * Список поставок FBW — POST /api/v1/supplies
+   * Токен должен иметь категорию «Поставки FBW».
+   * @param statusIDs — фильтр по статусам (пусто = все, макс 1000 поставок)
+   */
+  async getSupplies(statusIDs?: number[]): Promise<WBSupplyItem[]> {
+    const url = `${WB_SUPPLIES_URL}/api/v1/supplies?limit=1000`
+    const body: Record<string, unknown> = {}
+    if (statusIDs?.length) body.statusIDs = statusIDs
+    const result = await this.fetch<WBSupplyItem[]>(url, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    return result ?? []
+  }
+
+  /**
+   * Товары внутри конкретной поставки FBW — GET /api/v1/supplies/{id}/goods
+   * Только для поставок с supplyID != null.
+   */
+  async getSupplyGoods(supplyID: number, offset = 0): Promise<WBSupplyGood[]> {
+    const url = `${WB_SUPPLIES_URL}/api/v1/supplies/${supplyID}/goods?limit=1000&offset=${offset}`
+    const result = await this.fetch<WBSupplyGood[]>(url)
+    return result ?? []
   }
 
   /**
