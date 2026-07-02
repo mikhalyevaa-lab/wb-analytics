@@ -90,13 +90,25 @@ export async function GET(req: NextRequest) {
   // Helper to aggregate rows into periodMap
   function aggregateRows(data: FunnelRow[]) {
     const map = new Map<string, PeriodAcc>()
+    // orderSumByDate — это сумма заказов магазина ЗА ДЕНЬ (не за nm_id), поэтому
+    // прибавляем её к периоду только один раз на дату, а не в каждой строке nm_id
+    const countedDates = new Set<string>()
     for (const r of data) {
       const period = aggLevel === 'week' ? isoWeek(r.date) : r.date
       const cur = map.get(period) ?? { period, open_count: 0, cart_count: 0, order_count: 0, order_sum: 0, buyout_count: 0, buyout_sum: 0, rows: 0 }
       cur.open_count  += r.open_count  ?? 0
       cur.cart_count  += r.cart_count  ?? 0
       cur.order_count += r.order_count ?? 0
-      cur.order_sum   += orderSumByDate.get(r.date?.slice(0, 10) ?? '') ?? (r.order_sum ?? 0)
+      const dateKey = r.date?.slice(0, 10) ?? ''
+      const dailySum = orderSumByDate.get(dateKey)
+      if (dailySum !== undefined) {
+        if (!countedDates.has(dateKey)) {
+          countedDates.add(dateKey)
+          cur.order_sum += dailySum
+        }
+      } else {
+        cur.order_sum += r.order_sum ?? 0
+      }
       cur.buyout_count += r.buyout_count ?? 0
       cur.buyout_sum  += r.buyout_sum  ?? 0
       cur.rows += 1
