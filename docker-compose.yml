@@ -37,6 +37,11 @@ services:
       - "3000:3000"
     env_file:
       - .env.local
+    environment:
+      # localhost внутри контейнера — это сам контейнер, а не сервис db;
+      # .env.local рассчитан на локальный `npm run dev` (порт 3001), поэтому здесь переопределяем
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wbuser}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wbanalytics}
+      BETTER_AUTH_URL: http://localhost:3000
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -48,6 +53,8 @@ services:
       dockerfile: docker/cron/Dockerfile
     env_file:
       - .env.local
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wbuser}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wbanalytics}
     depends_on:
       migrate:
         condition: service_completed_successfully
