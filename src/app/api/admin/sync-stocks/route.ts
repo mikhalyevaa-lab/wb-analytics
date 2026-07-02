@@ -1,15 +1,8 @@
 import { adminDb } from '@/lib/db-compat'
 import { NextResponse } from 'next/server'
 import { createWBClient } from '@/lib/wb-api'
-import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
-
-function createAdminSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
-}
 
 export async function POST(req: Request) {
   const authHeader = req.headers.get('authorization')
@@ -22,7 +15,6 @@ export async function POST(req: Request) {
   const stores = (storesRaw ?? []) as { id: string; name: string; wb_token: string }[]
   if (!stores.length) return NextResponse.json({ error: 'no stores' }, { status: 404 })
 
-  const db = createAdminSupabase()
   const today = new Date().toISOString().split('T')[0]
   const results: Record<string, { count: number; error?: string }> = {}
 

@@ -9,8 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.12.0",
-    "@supabase/supabase-js": "^2.108.2",
     "@tanstack/react-virtual": "^3.14.3",
     "@types/pg": "^8.20.0",
     "adm-zip": "^0.5.17",

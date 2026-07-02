@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-server'
 import { getUserStoreIds } from '@/lib/queries'
 import { syncStore } from '@/lib/sync'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { adminDb } from '@/lib/db-compat'
 
 export async function POST(req: NextRequest) {
   const user = await requireAuth().catch(() => null)
@@ -11,13 +11,7 @@ export async function POST(req: NextRequest) {
   const storeIds = await getUserStoreIds(user.id)
   if (!storeIds.length) return NextResponse.json({ error: 'No stores' }, { status: 400 })
 
-  const admin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-
-  const { data: stores } = await admin
+  const { data: stores } = await adminDb()
     .from('stores')
     .select('id, name, wb_token')
     .in('id', storeIds)

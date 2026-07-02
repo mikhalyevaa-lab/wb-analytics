@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { sendTelegramMessage, formatDailySummary } from '@/lib/telegram'
 import { getKpi, getDailySales, getStockAlerts } from '@/lib/queries'
 

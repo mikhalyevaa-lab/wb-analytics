@@ -1,6 +1,5 @@
 import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createWBClient } from '@/lib/wb-api'
 import { requireAuth } from '@/lib/auth-server'
 

@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { adminDb } from '@/lib/db-compat'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { syncAdvertPeriod } from '@/lib/sync'
 import { requireAuth } from '@/lib/auth-server'
 

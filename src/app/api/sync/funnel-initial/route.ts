@@ -14,7 +14,6 @@ import { adminDb } from '@/lib/db-compat'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { syncFunnelPeriod } from '@/lib/sync'
-import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '@/lib/auth-server'
 
 const CRON_SECRET = process.env.CRON_SECRET

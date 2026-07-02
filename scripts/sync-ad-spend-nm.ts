@@ -8,16 +8,15 @@
  */
 import { config } from 'dotenv'
 config({ path: '.env.local' })
-import { createClient } from '@supabase/supabase-js'
 
 const STORE_ID = '73d40959-1920-4c68-a0f5-3684846b923f'
 const BATCH_SIZE = 50
 const DELAY_MS = 20_000
 
-const db = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Динамический импорт — чтобы .env.local гарантированно подгрузился ДО того,
+// как @/lib/db прочитает process.env.DATABASE_URL при инициализации соединения
+const { adminDb } = await import('../src/lib/db-compat')
+const db = adminDb()
 
 function moscowDateStr(offsetDays = 0) {
   const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
@@ -42,6 +41,7 @@ interface NmRow {
   orders_sum: number
   atbs: number
   canceled: number
+  [key: string]: unknown
 }
 
 async function fetchAndSaveNmData(

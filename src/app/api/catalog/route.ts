@@ -9,7 +9,7 @@ export async function GET() {
   const { data: stores } = await adminDb().from('user_stores').select('store_id').eq('user_id', user.id)
   const storeIds = (stores ?? []).map((s: { store_id: string }) => s.store_id)
 
-  // Два отдельных запроса вместо Supabase relationship syntax
+  // Два отдельных запроса — db-compat не поддерживает JOIN/relationship-синтаксис
   const [{ data: products, error }, { data: groups }] = await Promise.all([
     adminDb()
       .from('products')

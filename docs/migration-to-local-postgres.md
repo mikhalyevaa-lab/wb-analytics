@@ -1,7 +1,7 @@
 # Миграция с Supabase на локальный PostgreSQL 17 в Docker
 
 > Составлен: 2026-06-23  
-> Статус: план (не применён)
+> Статус: применено (2026-07-02). БД, auth (better-auth), все API-роуты и скрипты переведены на postgres.js/db-compat. Зависимости `@supabase/supabase-js` и `@supabase/ssr` удалены из package.json. Старые файлы облачной схемы (schema.sql, schema_complete.sql) и разовые SQL (migration_001_gsale_blocks.sql, seed_store.sql) удалены — актуальная схема в schema_local.sql + supabase/migrations/.
 
 ---
 

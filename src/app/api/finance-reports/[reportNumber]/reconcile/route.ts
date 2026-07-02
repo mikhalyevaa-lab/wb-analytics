@@ -28,7 +28,7 @@ export async function POST(
 
   if (!summary) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
-  // Грузим постранично — Supabase по умолчанию отдаёт не более 1000 строк за раз
+  // Грузим постранично батчами по 1000 строк — безопасный паттерн для больших выгрузок
   const allRows: Record<string, number | null | string>[] = []
   const PAGE = 1000
   let from = 0

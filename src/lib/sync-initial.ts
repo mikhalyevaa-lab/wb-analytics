@@ -400,7 +400,7 @@ export async function recalcProductAggregates(
 
   if (!products?.length) return
 
-  // Paginate wb_stocks (Supabase hard cap = 1000 rows per request)
+  // Paginate wb_stocks батчами по 1000 строк — безопасный паттерн для больших выгрузок
   // quantity_full = общий остаток включая зарезервированные в заказах
   const stocks: { nm_id: number | null; quantity: number | null; quantity_full: number | null }[] = []
   for (let page = 0; ; page++) {
