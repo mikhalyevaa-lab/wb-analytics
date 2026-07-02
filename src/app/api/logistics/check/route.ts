@@ -18,6 +18,23 @@ function calcReverseLogisticsTariff(volumeLiters: number): number {
   return 46 + 14 * (volumeLiters - 1)
 }
 
+// Категории с периодом фиксации 90 дней (п. 6.6.3 оферты Wildberries) — для остальных 60 дней
+const FIXATION_90_DAY_PARENT_CATEGORIES = new Set([
+  'спортивная одежда',
+  'обувь',
+  'аксессуары для малышей',
+  'одежда для малышей',
+  'белье для малышей',
+  'бельё для малышей',
+  'одежда',
+  'головные уборы',
+])
+
+function fixationPeriodDays(parentName: string | null): number {
+  if (!parentName) return 90 // нет данных о категории — консервативный дефолт (как раньше)
+  return FIXATION_90_DAY_PARENT_CATEGORIES.has(parentName.toLowerCase().trim()) ? 90 : 60
+}
+
 // Нормализация названия склада для матчинга с тарифами
 function normalizeWarehouse(name: string): string {
   return name.toLowerCase().trim().replace(/[_\-]/g, ' ')
@@ -80,7 +97,7 @@ export async function GET(req: Request) {
   if (weekParam) reportQuery = reportQuery.eq('report_number', weekParam)
   reportQuery = reportQuery.order('report_number', { ascending: false }).limit(limitParam)
 
-  const [indexRows, products, tariffs, reportRows, suppliesRows] = await Promise.all([
+  const [indexRows, products, commissions, tariffs, reportRows, suppliesRows] = await Promise.all([
     // Последний актуальный индекс (ИРП + ИЛ)
     adb.from('wb_logistics_indexes')
       .select('week_date, irp, localization_index')
@@ -90,10 +107,15 @@ export async function GET(req: Request) {
 
     // Продукты с объёмом и средней ценой (для ИРП когда retail_price = 0)
     adb.from('products')
-      .select('nm_id, vendor_code, title, volume_liters, avg_price_before_spp')
+      .select('nm_id, vendor_code, title, volume_liters, avg_price_before_spp, subject_id')
       .in('store_id', storeIds)
       .not('volume_liters', 'is', null)
       .limit(10000),
+
+    // Родительская категория предмета (для периода фиксации тарифа — 90/60 дней)
+    adb.from('wb_commissions')
+      .select('subject_id, parent_name')
+      .in('store_id', storeIds),
 
     // Тарифы складов (тип box)
     adb.from('wb_tariffs')
@@ -115,9 +137,20 @@ export async function GET(req: Request) {
   const indexes = indexRows.data ?? []
   const latestIndex = indexes[0] ?? null
 
-  const productMap = new Map<number, { vendor_code: string | null; title: string | null; volume_liters: number | null; avg_price_before_spp: number | null }>()
+  // subject_id → parent_name (родительская категория) — из комиссий WB
+  const parentNameBySubject = new Map<number, string | null>()
+  for (const c of commissions.data ?? []) {
+    if (c.subject_id != null) parentNameBySubject.set(c.subject_id, c.parent_name ?? null)
+  }
+
+  const productMap = new Map<number, { vendor_code: string | null; title: string | null; volume_liters: number | null; avg_price_before_spp: number | null; parent_name: string | null }>()
   for (const p of products.data ?? []) {
-    if (p.nm_id) productMap.set(p.nm_id, p)
+    if (p.nm_id) {
+      productMap.set(p.nm_id, {
+        ...p,
+        parent_name: p.subject_id != null ? (parentNameBySubject.get(p.subject_id) ?? null) : null,
+      })
+    }
   }
 
   type TariffRow = { warehouse_name: string; delivery_base: number; delivery_liter: number | null; delivery_coef_expr: number | null; loaded_at?: string | null; dt_till_max?: string | null }
@@ -188,8 +221,8 @@ export async function GET(req: Request) {
       const daysDiff = Math.round(
         (new Date(row.order_date).getTime() - new Date(supplyDate).getTime()) / 86400000
       )
-      // TODO: 60 дней для неодёжных категорий — нужно поле subject в products
-      tariffType = daysDiff < 90 ? 'Фиксированный' : 'Текущий'
+      const periodDays = fixationPeriodDays(product?.parent_name ?? null)
+      tariffType = daysDiff < periodDays ? 'Фиксированный' : 'Текущий'
     }
     // Обратная логистика фиксируется только с 15.05.2026
     if (isReturn && supplyDate && supplyDate < REVERSE_FIXATION_START) {
