@@ -213,14 +213,37 @@ export default function FunnelPage() {
         <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
       )}
 
-      {!loading && data && !data.hasData && (
-        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-4 text-sm">
-          <p className="font-medium text-amber-800 dark:text-amber-300">Нет данных воронки за период</p>
-          <p className="text-amber-700 dark:text-amber-400 mt-1">
-            Данные обновляются автоматически каждые 2 часа. Попробуйте выбрать другой период.
-          </p>
-        </div>
-      )}
+      {!loading && data && !data.hasData && (() => {
+        const lastDate = data.lastSyncDate
+          ? new Date(data.lastSyncDate).toLocaleDateString('ru', { day: 'numeric', month: 'long' })
+          : null
+        return (
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-4 text-sm">
+            <p className="font-medium text-amber-800 dark:text-amber-300">Нет данных воронки за выбранный период</p>
+            {lastDate ? (
+              <p className="text-amber-700 dark:text-amber-400 mt-1">
+                WB передаёт данные воронки с задержкой 1–2 дня.
+                Последние доступные данные — за <strong>{lastDate}</strong>.
+                {' '}
+                <button
+                  className="underline font-medium hover:no-underline"
+                  onClick={() => {
+                    const d = data.lastSyncDate!
+                    setDateFrom(d); setDateTo(d); setActivePreset('')
+                    load(d, d, aggLevel)
+                  }}
+                >
+                  Показать за {lastDate}
+                </button>
+              </p>
+            ) : (
+              <p className="text-amber-700 dark:text-amber-400 mt-1">
+                Данные обновляются автоматически каждые 2 часа. Попробуйте выбрать другой период.
+              </p>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Summary KPIs */}
       {!loading && s && data?.hasData && (

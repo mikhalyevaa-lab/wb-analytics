@@ -9,23 +9,23 @@ interface ReturnItem {
   article: string
   title: string | null
   photo_url: string | null
-  sales_28d: number
-  returns_28d: number
-  buyout_rate: number
+  sales_nd: number
+  returns_nd: number
+  return_rate: number
   net_revenue: number
   returns_sum: number
 }
 
-type SortKey = 'buyout_rate' | 'returns_28d' | 'returns_sum' | 'net_revenue'
+type SortKey = 'return_rate' | 'returns_nd' | 'returns_sum' | 'net_revenue'
 
 function fmtRub(n: number) {
   return n.toLocaleString('ru', { maximumFractionDigits: 0 }) + ' ₽'
 }
 
-function BuyoutBadge({ rate }: { rate: number }) {
-  const bg = rate < 30 ? 'bg-red-100 text-red-700'
-    : rate < 40 ? 'bg-orange-100 text-orange-700'
-    : 'bg-amber-100 text-amber-700'
+function ReturnBadge({ rate }: { rate: number }) {
+  const bg = rate > 7  ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400'
+    : rate > 3  ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${bg}`}>
       {rate.toFixed(1)}%
@@ -41,18 +41,20 @@ function SortIcon({ field, sort }: { field: SortKey; sort: { key: SortKey; dir: 
 }
 
 export function ReturnsTable({
-  items,
-  loading,
-  total,
+  items, loading, total, avgReturnRate = 0,
 }: {
   items: ReturnItem[]
   loading: boolean
   total: number
+  avgReturnRate?: number
 }) {
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'buyout_rate', dir: 'asc' })
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'returns_nd', dir: 'desc' })
 
   const toggleSort = (key: SortKey) => {
-    setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'buyout_rate' ? 'asc' : 'desc' })
+    setSort(s => s.key === key
+      ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: 'desc' }
+    )
   }
 
   const sorted = [...items].sort((a, b) => {
@@ -62,7 +64,7 @@ export function ReturnsTable({
 
   const ThSort = ({ label, field }: { label: string; field: SortKey }) => (
     <th
-      className="px-3 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:text-zinc-800 transition-colors"
+      className="px-3 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
       onClick={() => toggleSort(field)}
     >
       <span className="flex items-center gap-1">
@@ -85,25 +87,34 @@ export function ReturnsTable({
   if (!items.length) {
     return (
       <div className="text-center py-12 text-zinc-400">
-        <p className="text-lg font-medium">Нет SKU с выкупом ниже порога</p>
-        <p className="text-sm mt-1">Попробуйте увеличить порог или снизить минимальное число продаж</p>
+        <p className="text-lg font-medium">Нет SKU с возвратом выше среднего</p>
+        <p className="text-sm mt-1">Попробуйте снизить минимальное число операций</p>
       </div>
     )
+  }
+
+  const sortLabel: Record<SortKey, string> = {
+    returns_nd:  'кол-во возвратов',
+    return_rate: '% возврата',
+    returns_sum: 'сумма возвратов',
+    net_revenue: 'выручка',
   }
 
   return (
     <div>
       <p className="text-xs text-zinc-400 mb-3">
-        Показано {items.length} из {total} SKU · сортировка: {sort.key === 'buyout_rate' ? '% выкупа' : sort.key} {sort.dir === 'asc' ? '↑' : '↓'}
+        Показано {items.length} из {total} SKU
+        {avgReturnRate > 0 && <> · среднее по кабинету {avgReturnRate.toFixed(1)}%</>}
+        {' '}· сортировка: {sortLabel[sort.key]} {sort.dir === 'asc' ? '↑' : '↓'}
       </p>
       <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
         <table className="w-full text-sm">
           <thead className="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700">
             <tr>
               <th className="px-3 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide">Артикул</th>
-              <ThSort label="Выкуп %" field="buyout_rate" />
-              <ThSort label="Продаж 28д" field="net_revenue" />
-              <ThSort label="Возвратов" field="returns_28d" />
+              <ThSort label="% возврата" field="return_rate" />
+              <ThSort label="Продаж" field="net_revenue" />
+              <ThSort label="Возвратов" field="returns_nd" />
               <ThSort label="Сумма возвр." field="returns_sum" />
               <th className="px-3 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide">Выручка (нетто)</th>
             </tr>
@@ -128,14 +139,14 @@ export function ReturnsTable({
                   </div>
                 </td>
                 <td className="px-3 py-3">
-                  <BuyoutBadge rate={item.buyout_rate} />
+                  <ReturnBadge rate={item.return_rate} />
                 </td>
                 <td className="px-3 py-3 text-zinc-700 dark:text-zinc-300">
-                  {item.sales_28d}
+                  {item.sales_nd}
                 </td>
                 <td className="px-3 py-3">
-                  <span className={item.returns_28d > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-zinc-500'}>
-                    {item.returns_28d}
+                  <span className={item.returns_nd > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-zinc-500'}>
+                    {item.returns_nd}
                   </span>
                 </td>
                 <td className="px-3 py-3 text-red-600 dark:text-red-400 font-medium">

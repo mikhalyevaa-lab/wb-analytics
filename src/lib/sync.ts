@@ -15,7 +15,7 @@ import type { WBFunnelItem } from './wb-api'
 
 function adminClient() { return createAdminClient() }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SupabaseAdminClient = any
+type AdminDbClient = any
 
 // ---------- Типы ----------
 
@@ -33,7 +33,7 @@ async function shouldSync(
   storeId: string,
   method: string,
   minIntervalHours: number,
-  db: SupabaseAdminClient
+  db: AdminDbClient
 ): Promise<boolean> {
   const { data } = await db
     .from('sync_log')
@@ -55,7 +55,7 @@ async function shouldSync(
 async function logSync(
   storeId: string,
   method: string,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   fn: () => Promise<{ count: number; error?: string; dateFrom?: string }>
 ): Promise<{ count: number; error?: string }> {
   const startMs = Date.now()
@@ -99,7 +99,7 @@ async function logSync(
 async function getDeltaFrom(
   storeId: string,
   table: 'wb_orders' | 'wb_sales',
-  db: SupabaseAdminClient
+  db: AdminDbClient
 ): Promise<{ wbDate: string; isoDate: string }> {
   const { data } = await db
     .from(table)
@@ -135,6 +135,10 @@ export async function syncStore(store: Store): Promise<{
   results.orders = await logSync(store.id, 'orders', db, () => syncOrders(store, wb, db))
   await sleep(1000)
   results.sales = await logSync(store.id, 'sales', db, () => syncSales(store, wb, db))
+  await sleep(1000)
+
+  // Возвраты ЛК WB — каждый запуск (статус заявки меняется)
+  results.lk_returns = await logSync(store.id, 'lk_returns', db, () => syncLkReturns(store, wb, db))
   await sleep(1000)
 
   // Поставки FBW — раз в 6 часов (новый API supplies-api.wildberries.ru)
@@ -193,8 +197,8 @@ export async function syncStore(store: Store): Promise<{
     console.log(`[sync] advert: throttled`)
   }
 
-  // Воронка — раз в 24 часа (данные с дневной точностью)
-  if (await shouldSync(store.id, 'funnel', 24, db)) {
+  // Воронка — раз в 12 часов (включая сегодняшние данные от WB)
+  if (await shouldSync(store.id, 'funnel', 12, db)) {
     await logSync(store.id, 'funnel', db, async () => {
       await syncFunnel(store, db, results)
       return results.funnel ?? { count: 0 }
@@ -231,7 +235,7 @@ export async function syncStore(store: Store): Promise<{
 async function syncOrders(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
 ): Promise<{ count: number; error?: string; dateFrom?: string }> {
   // Дельта-окно: от MAX(last_change_date) − 10 мин, или 7 дней при первом синке
   const { wbDate, isoDate } = await getDeltaFrom(store.id, 'wb_orders', db)
@@ -290,7 +294,7 @@ async function syncOrders(
 async function syncSales(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
 ): Promise<{ count: number; error?: string; dateFrom?: string }> {
   // Дельта-окно: от MAX(last_change_date) − 10 мин, или 7 дней при первом синке
   const { wbDate, isoDate } = await getDeltaFrom(store.id, 'wb_sales', db)
@@ -338,12 +342,76 @@ async function syncSales(
   }
 }
 
+// ---------- Возвраты ЛК WB (заявки покупателей) ----------
+// API: GET https://returns-api.wildberries.ru/api/v1/claims
+// Ограничение: только последние 14 дней, пагинация limit/offset (max 200)
+// Токен категории «Возвраты покупателями»
+
+async function syncLkReturns(
+  store: Store,
+  wb: ReturnType<typeof createWBClient>,
+  db: AdminDbClient,
+): Promise<{ count: number; error?: string }> {
+  console.log(`[sync] lk_returns store: ${store.name}`)
+  try {
+    // Загружаем активные и архивные заявки (обе категории)
+    const allClaims: import('./wb-api').WBClaim[] = []
+    for (const isArchive of [false, true]) {
+      let offset = 0
+      while (true) {
+        const batch = await wb.getClaims(isArchive, 200, offset)
+        if (!batch?.length) break
+        allClaims.push(...batch)
+        if (batch.length < 200) break
+        offset += 200
+        await sleep(300) // 20 req/min → ~3 сек между пакетами
+      }
+    }
+
+    console.log(`[sync] lk_returns fetched: ${allClaims.length} claims`)
+    if (!allClaims.length) return { count: 0 }
+
+    const rows = allClaims
+      .filter(c => c.id)
+      .map(c => ({
+        store_id:         store.id,
+        date:             c.created_at ?? null,
+        last_change_date: c.updated_at ?? c.created_at ?? null,
+        supplier_article: c.supplier_article ?? null,
+        nm_id:            c.nm_id ?? null,
+        barcode:          null,
+        category:         c.category ?? null,
+        subject:          c.subject ?? null,
+        techsize:         null,
+        total_price:      c.price ?? null,
+        return_status:    c.status ?? null,
+        warehouse_name:   c.warehouse_name ?? null,
+        g_number:         null,
+        srid:             c.id,  // UUID заявки как уникальный ключ
+      }))
+
+    let total = 0
+    for (const chunk of chunkArray(rows, 500)) {
+      const { error, count } = await db
+        .from('wb_lk_returns')
+        .upsert(chunk, { onConflict: 'store_id,srid' })
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
+      total += count || chunk.length
+    }
+    return { count: total }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[sync] lk_returns error:', msg)
+    return { count: 0, error: msg }
+  }
+}
+
 // ---------- Остатки ----------
 
 async function syncStocks(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   try {
@@ -394,7 +462,7 @@ async function syncStocks(
 async function syncFinance(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   try {
@@ -453,7 +521,7 @@ const IN_TRANSIT_STATUSES = [2, 3, 4, 6]
 async function syncSupplies(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   try {
@@ -477,16 +545,28 @@ async function syncSupplies(
 
     const { error: supErr } = await db
       .from('wb_supplies')
-      .upsert(supplyRows, { onConflict: 'store_id,preorder_id' })
+      .upsert(supplyRows, { onConflict: 'store_id,supply_id' })
     if (supErr) throw new Error(supErr.message ?? JSON.stringify(supErr))
 
-    // Шаг 3: товары для поставок "в пути" (у которых есть supplyID)
-    const activeSupplies = supplies.filter(
-      s => s.supplyID !== null && IN_TRANSIT_STATUSES.includes(s.statusID)
-    )
+    // Шаг 3: определяем для каких supplyID товары уже загружены
+    const { data: existingGoods } = await db
+      .from('wb_supply_goods')
+      .select('supply_id')
+      .eq('store_id', store.id)
+    const loadedSupplyIds = new Set((existingGoods ?? []).map((g: { supply_id: number }) => g.supply_id))
+
+    // Грузим товары для:
+    // - активных поставок (в пути) — всегда, чтобы обновлять количества
+    // - завершённых поставок (статус 5) — только первый раз (нет в wb_supply_goods)
+    const suppliesNeedingGoods = supplies.filter(s => {
+      if (s.supplyID === null) return false
+      if (IN_TRANSIT_STATUSES.includes(s.statusID)) return true
+      if (s.statusID === 5 && !loadedSupplyIds.has(s.supplyID)) return true
+      return false
+    })
 
     let goodsTotal = 0
-    for (const supply of activeSupplies) {
+    for (const supply of suppliesNeedingGoods) {
       const goods = await wb.getSupplyGoods(supply.supplyID!)
       if (!goods?.length) continue
 
@@ -507,18 +587,7 @@ async function syncSupplies(
       if (gErr) throw new Error(gErr.message ?? JSON.stringify(gErr))
       goodsTotal += goodsRows.length
 
-      await sleep(300) // пауза между запросами на товары
-    }
-
-    // Шаг 4: удаляем товары для поставок, которые теперь имеют статус "принято" (5)
-    const completedIds = supplies
-      .filter(s => s.supplyID !== null && s.statusID === 5)
-      .map(s => s.supplyID!)
-    if (completedIds.length) {
-      await db.from('wb_supply_goods')
-        .delete()
-        .in('supply_id', completedIds)
-        .eq('store_id', store.id)
+      await sleep(300)
     }
 
     results.supplies = { count: supplies.length + goodsTotal }
@@ -534,7 +603,7 @@ async function syncSupplies(
 async function syncProducts(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   try {
@@ -591,7 +660,7 @@ async function syncProducts(
 async function syncAdvert(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   try {
@@ -696,7 +765,7 @@ async function syncAdvert(
 async function syncCommissions(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   results.commissions = await logSync(store.id, 'commissions', db, async () => {
@@ -738,7 +807,7 @@ async function syncCommissions(
 async function syncTariffs(
   store: Store,
   wb: ReturnType<typeof createWBClient>,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   results.tariffs = await logSync(store.id, 'tariffs', db, async () => {
@@ -890,16 +959,16 @@ export async function syncOrdersPeriod(
 const FUNNEL_BATCH = 20 // лимит API — 20 nm_id за запрос
 
 /** Возвращает все nm_id для магазина из таблицы products */
-async function getStoreNmIds(storeId: string, db: SupabaseAdminClient): Promise<number[]> {
+async function getStoreNmIds(storeId: string, db: AdminDbClient): Promise<number[]> {
   const { data } = await db.from('products').select('nm_id').eq('store_id', storeId)
   return (data ?? []).map((r: any) => Number(r.nm_id)).filter(Boolean)
 }
 
-/** Записывает строки воронки в Supabase (upsert по store_id+date+nm_id) */
+/** Записывает строки воронки в БД (upsert по store_id+date+nm_id) */
 async function upsertFunnelRows(
   storeId: string,
   items: WBFunnelItem[],
-  db: SupabaseAdminClient
+  db: AdminDbClient
 ): Promise<number> {
   const rows = items.flatMap(item =>
     (item.history ?? []).map(day => ({
@@ -934,11 +1003,12 @@ async function upsertFunnelRows(
 }
 
 /**
- * Синхронизация воронки: вчера + позавчера (WB поздно финализирует данные)
+ * Синхронизация воронки: сегодня + вчера + позавчера
+ * WB Analytics API отдаёт данные за текущий день (не требует задержки)
  */
 async function syncFunnel(
   store: Store,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   const analyticsToken = store.wb_analytics_token || store.wb_token
@@ -950,12 +1020,13 @@ async function syncFunnel(
     const nmIds = await getStoreNmIds(store.id, db)
     if (!nmIds.length) { results.funnel = { count: 0 }; return }
 
+    const today      = daysAgo(0).toISOString().split('T')[0]
     const yesterday  = daysAgo(1).toISOString().split('T')[0]
     const dayBefore  = daysAgo(2).toISOString().split('T')[0]
     const wb = createWBClient(analyticsToken)
     let total = 0
 
-    for (const dateStr of [yesterday, dayBefore]) {
+    for (const dateStr of [today, yesterday, dayBefore]) {
       let items: WBFunnelItem[] = []
       for (let i = 0; i < nmIds.length; i += FUNNEL_BATCH) {
         if (i > 0) await sleep(3000)
@@ -1087,7 +1158,7 @@ export async function recalcAllStoresAggregates(): Promise<void> {
  */
 async function syncPaidStorageInternal(
   store: Store,
-  db: SupabaseAdminClient,
+  db: AdminDbClient,
   results: Record<string, { count: number; error?: string }>
 ) {
   if (!store.wb_analytics_token) {
@@ -1352,4 +1423,13 @@ export async function syncAdvertPeriod(
   }
 
   return { inserted, errors }
+}
+
+// Экспортированная обёртка для ручного запуска синка ЛК-возвратов
+export async function syncLkReturnsForStore(
+  store: { id: string; name: string; wb_token: string }
+): Promise<{ count: number; error?: string }> {
+  const wb = createWBClient(store.wb_token)
+  const db = adminClient()
+  return syncLkReturns({ ...store, wb_analytics_token: null }, wb, db)
 }

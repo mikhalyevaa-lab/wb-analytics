@@ -9,6 +9,7 @@ const WB_ADV_URL       = 'https://advert-api.wildberries.ru'
 const WB_ANALYTICS_URL = 'https://seller-analytics-api.wildberries.ru'
 const WB_COMMON_URL    = 'https://common-api.wildberries.ru'
 const WB_SUPPLIES_URL  = 'https://supplies-api.wildberries.ru'
+const WB_RETURNS_URL   = 'https://returns-api.wildberries.ru'
 
 // ---------- Типы данных ----------
 
@@ -122,6 +123,28 @@ export interface WBFinanceRow {
   order_dt: string
   office_name: string
   supplier_oper_name: string
+}
+
+// Заявки покупателей на возврат (returns-api.wildberries.ru)
+// GET /api/v1/claims — только последние 14 дней, пагинация limit/offset
+export interface WBClaim {
+  id: string             // UUID заявки
+  nm_id: number          // артикул WB
+  status?: string        // статус заявки
+  created_at?: string    // дата создания
+  updated_at?: string    // дата последнего изменения
+  actions?: string[]     // доступные действия (approve, reject, ...)
+  // поля товара
+  supplier_article?: string
+  subject?: string
+  category?: string
+  brand?: string
+  price?: number
+  quantity?: number
+  // поля возврата
+  return_type?: string
+  warehouse_name?: string
+  [key: string]: unknown // дополнительные поля — схема уточняется
 }
 
 export interface WBIncome {
@@ -572,6 +595,22 @@ class WBApiClient {
     } catch {
       return null
     }
+  }
+
+  /**
+   * Заявки покупателей на возврат
+   * GET /api/v1/claims (returns-api.wildberries.ru)
+   * Токен категории «Возвраты покупателями».
+   * Только последние 14 дней, пагинация limit(max 200)/offset.
+   * is_archive=false — активные, true — архивные.
+   */
+  async getClaims(isArchive: boolean, limit = 200, offset = 0): Promise<WBClaim[]> {
+    const url = `${WB_RETURNS_URL}/api/v1/claims?is_archive=${isArchive}&limit=${limit}&offset=${offset}`
+    const result = await this.fetch<WBClaim[] | { data?: WBClaim[] } | null>(url)
+    // API может вернуть массив напрямую или объект с полем data
+    if (Array.isArray(result)) return result
+    if (result && typeof result === 'object' && 'data' in result) return result.data ?? []
+    return []
   }
 
   /**

@@ -5,6 +5,19 @@ import { getUserStoreIds } from '@/lib/queries'
 
 export const dynamic = 'force-dynamic'
 
+// Обратная логистика: базовый тариф по объёму, без ИЛ и ИРП
+// Источник: seller.wildberries.ru/instructions/ru/ru/material/logistics-types-and-cost-calculation
+const REVERSE_FIXATION_START = '2026-05-15' // Фиксация обратной логистики с 15.05.2026
+
+function calcReverseLogisticsTariff(volumeLiters: number): number {
+  if (volumeLiters <= 0.200) return 23
+  if (volumeLiters <= 0.400) return 26
+  if (volumeLiters <= 0.600) return 29
+  if (volumeLiters <= 0.800) return 30
+  if (volumeLiters <= 1.000) return 32
+  return 46 + 14 * (volumeLiters - 1)
+}
+
 // Нормализация названия склада для матчинга с тарифами
 function normalizeWarehouse(name: string): string {
   return name.toLowerCase().trim().replace(/[_\-]/g, ' ')
@@ -13,22 +26,33 @@ function normalizeWarehouse(name: string): string {
 // Матчинг склада из отчёта с тарифами
 function matchTariff(
   reportWarehouse: string,
-  tariffs: { warehouse_name: string; delivery_base: number; delivery_liter: number | null; delivery_coef_expr: number | null }[]
+  tariffs: { warehouse_name: string; delivery_base: number; delivery_liter: number | null; delivery_coef_expr: number | null; loaded_at?: string | null; dt_till_max?: string | null }[]
 ) {
   const norm = normalizeWarehouse(reportWarehouse)
   // Точное совпадение
   let t = tariffs.find(t => normalizeWarehouse(t.warehouse_name) === norm)
   if (!t) {
-    // Частичное совпадение (склад из отчёта содержит имя тарифа или наоборот)
+    // Частичное совпадение (одно название содержит другое)
     t = tariffs.find(t => {
       const tNorm = normalizeWarehouse(t.warehouse_name)
       return norm.includes(tNorm) || tNorm.includes(norm)
     })
   }
+  if (!t) {
+    // Матчинг по ключевому слову (≥5 букв) — "СЦ Шушары" ↔ "СПБ Шушары"
+    const words = norm.split(' ').filter(w => w.length >= 5)
+    if (words.length) {
+      t = tariffs.find(t => {
+        const tNorm = normalizeWarehouse(t.warehouse_name)
+        return words.some(w => tNorm.includes(w))
+      })
+    }
+  }
   return t ?? null
 }
 
 export async function GET(req: Request) {
+  try {
   const user = await requireAuth().catch(() => null)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -36,11 +60,27 @@ export async function GET(req: Request) {
   if (!storeIds.length) return NextResponse.json({ error: 'No store' }, { status: 404 })
 
   const { searchParams } = new URL(req.url)
-  const limitParam = parseInt(searchParams.get('limit') ?? '500', 10)
+  const limitParam = parseInt(searchParams.get('limit') ?? '10000', 10)
+  const weekParam  = searchParams.get('week') ? parseInt(searchParams.get('week')!, 10) : null
 
   const adb = adminDb()
 
-  const [indexRows, products, tariffs, reportRows] = await Promise.all([
+  // Строки отчётов — все строки с расходами на логистику (включая возвраты)
+  let reportQuery = adb.from('wb_weekly_report_rows')
+    .select(`
+      nm_id, barcode, supplier_article, title, warehouse, office_name,
+      delivery_service_cost, retail_price_with_discount, retail_price, quantity,
+      doc_type, report_number, deliveries_count, returns_count,
+      order_date, sale_date, supply_number,
+      fix_start_date, fix_end_date, box_type
+    `)
+    .in('store_id', storeIds)
+    .not('delivery_service_cost', 'is', null)
+    .gt('delivery_service_cost', 0)
+  if (weekParam) reportQuery = reportQuery.eq('report_number', weekParam)
+  reportQuery = reportQuery.order('report_number', { ascending: false }).limit(limitParam)
+
+  const [indexRows, products, tariffs, reportRows, suppliesRows] = await Promise.all([
     // Последний актуальный индекс (ИРП + ИЛ)
     adb.from('wb_logistics_indexes')
       .select('week_date, irp, localization_index')
@@ -57,25 +97,19 @@ export async function GET(req: Request) {
 
     // Тарифы складов (тип box)
     adb.from('wb_tariffs')
-      .select('warehouse_name, delivery_base, delivery_liter, delivery_coef_expr')
+      .select('warehouse_name, delivery_base, delivery_liter, delivery_coef_expr, loaded_at, dt_till_max')
       .in('store_id', storeIds)
       .eq('tariff_type', 'box')
       .not('delivery_base', 'is', null),
 
-    // Строки еженедельных отчётов — только ПРЯМЫЕ ДОСТАВКИ (deliveries_count > 0)
-    // Возвраты (returns_count > 0) исключаем — у них другой тариф
-    adb.from('wb_weekly_report_rows')
-      .select(`
-        nm_id, barcode, supplier_article, title, warehouse,
-        delivery_service_cost, retail_price_with_discount, quantity,
-        doc_type, report_number, deliveries_count, returns_count
-      `)
+    reportQuery,
+
+    // Поставки — для получения даты фактической приёмки (factDate)
+    adb.from('wb_supplies')
+      .select('supply_id, fact_date')
       .in('store_id', storeIds)
-      .not('delivery_service_cost', 'is', null)
-      .gt('delivery_service_cost', 0)
-      .gt('deliveries_count', 0)
-      .order('report_number', { ascending: false })
-      .limit(limitParam),
+      .not('supply_id', 'is', null)
+      .not('fact_date', 'is', null),
   ])
 
   const indexes = indexRows.data ?? []
@@ -86,10 +120,18 @@ export async function GET(req: Request) {
     if (p.nm_id) productMap.set(p.nm_id, p)
   }
 
-  type TariffRow = { warehouse_name: string; delivery_base: number; delivery_liter: number | null; delivery_coef_expr: number | null }
+  type TariffRow = { warehouse_name: string; delivery_base: number; delivery_liter: number | null; delivery_coef_expr: number | null; loaded_at?: string | null; dt_till_max?: string | null }
   const tariffList = ((tariffs.data ?? []).filter(
     (t: { delivery_base: number | null }) => t.delivery_base != null
   ) as TariffRow[])
+
+  // supply_id → fact_date (YYYY-MM-DD). Ключ — строка: postgres.js возвращает bigint как string
+  const supplyMap = new Map<string, string>()
+  for (const s of suppliesRows.data ?? []) {
+    if (s.supply_id != null && s.fact_date) {
+      supplyMap.set(String(s.supply_id), (s.fact_date as string).slice(0, 10))
+    }
+  }
 
   type ReportRow = {
     nm_id: number | null
@@ -97,11 +139,21 @@ export async function GET(req: Request) {
     supplier_article: string | null
     title: string | null
     warehouse: string | null
+    office_name: string | null
     delivery_service_cost: number | null
     retail_price_with_discount: number | null
+    retail_price: number | null
     quantity: number | null
     doc_type: string | null
     report_number: number | null
+    deliveries_count: number | null
+    returns_count: number | null
+    order_date: string | null
+    sale_date: string | null
+    supply_number: string | null
+    fix_start_date: string | null
+    fix_end_date: string | null
+    box_type: string | null
   }
 
   const rows = (reportRows.data ?? []) as ReportRow[]
@@ -116,6 +168,34 @@ export async function GET(req: Request) {
   // Рассчитываем по каждой строке
   const details = rows.map(row => {
     const product = row.nm_id ? productMap.get(row.nm_id) : null
+
+    // Дата поставки: fact_date из wb_supplies по supply_number
+    const supplyDate = row.supply_number ? (supplyMap.get(row.supply_number) ?? null) : null
+
+    // Тип строки: возврат (обратная логистика) или прямая доставка
+    // deliveries_count=0 + returns_count>0 → покупатель вернул товар
+    const isReturn = (row.deliveries_count === 0 || row.deliveries_count == null)
+      && (row.returns_count != null && row.returns_count > 0)
+
+    // Тип тарифа:
+    // 1. Приоритет — fix_end_date из отчёта (точные даты фиксации от WB)
+    // 2. Fallback — разница order_date − supply_date (90 дн. для одежды/обуви, 60 дн. иначе)
+    // 3. Для обратной логистики: фиксация только с 15.05.2026; до этой даты — Текущий
+    let tariffType: 'Фиксированный' | 'Текущий' | 'Нет данных' = 'Нет данных'
+    if (row.fix_end_date && row.order_date) {
+      tariffType = row.order_date <= row.fix_end_date ? 'Фиксированный' : 'Текущий'
+    } else if (supplyDate && row.order_date) {
+      const daysDiff = Math.round(
+        (new Date(row.order_date).getTime() - new Date(supplyDate).getTime()) / 86400000
+      )
+      // TODO: 60 дней для неодёжных категорий — нужно поле subject в products
+      tariffType = daysDiff < 90 ? 'Фиксированный' : 'Текущий'
+    }
+    // Обратная логистика фиксируется только с 15.05.2026
+    if (isReturn && supplyDate && supplyDate < REVERSE_FIXATION_START) {
+      tariffType = 'Текущий'
+    }
+
     const volumeLiters = product?.volume_liters ?? null
     const tariff = row.warehouse ? matchTariff(row.warehouse, tariffList) : null
 
@@ -123,56 +203,87 @@ export async function GET(req: Request) {
     let hasTariff = false
     const hasVolume = volumeLiters != null && volumeLiters > 0
 
-    if (tariff && hasVolume && volumeLiters != null) {
+    let deliveryBaseUsed: number | null = null
+    let deliveryLiterUsed: number | null = null
+    let volUsed: number | null = null
+    let priceUsed: number | null = null
+    let tariffBase: number | null = null
+    let irpPart: number | null = null
+
+    if (isReturn) {
+      // Обратная логистика: только базовый тариф по объёму, без ИЛ и ИРП
+      // Источник: seller.wildberries.ru/instructions/ru/ru/material/logistics-types-and-cost-calculation
+      if (hasVolume && volumeLiters != null) {
+        hasTariff = true
+        volUsed = volumeLiters
+        calcLogistics = Math.round(calcReverseLogisticsTariff(volumeLiters) * 100) / 100
+      }
+    } else if (tariff && hasVolume && volumeLiters != null) {
+      // Прямая логистика: (base + liter × max(0, vol − 1)) × ИЛ + цена × ИРП
       hasTariff = true
-      const deliveryBase  = tariff.delivery_base
-      const deliveryLiter = tariff.delivery_liter ?? 0
+      deliveryBaseUsed  = tariff.delivery_base
+      deliveryLiterUsed = tariff.delivery_liter ?? 0
+      volUsed = volumeLiters
 
-      // volume_liters хранится в м³, переводим в литры (* 1000)
-      const volLiters = volumeLiters * 1000
-
-      // delivery_base уже включает коэф. склада — применяем только ИЛ
-      const tariffBase = deliveryBase + deliveryLiter * Math.max(0, volLiters - 1)
+      // delivery_base уже включает коэф. склада (delivery_coef_expr) — применяем только ИЛ
+      tariffBase = deliveryBaseUsed + deliveryLiterUsed * Math.max(0, volUsed - 1)
 
       // retail_price_with_discount часто = 0 в отчётах → берём avg_price_before_spp из карточки
-      const price = (row.retail_price_with_discount && row.retail_price_with_discount > 0)
+      priceUsed = (row.retail_price_with_discount && row.retail_price_with_discount > 0)
         ? row.retail_price_with_discount
         : (product?.avg_price_before_spp ?? 0)
 
-      // Полная формула (оферта п.13.1.10):
-      //   (base + liter × max(0, vol − 1)) × ИЛ + цена × ИРП
+      irpPart = priceUsed * irpRate
+
       calcLogistics = Math.round(
-        (tariffBase * ilCoef + price * irpRate) * 100
+        (tariffBase * ilCoef + irpPart) * 100
       ) / 100
     }
 
     const actualLogistics = row.delivery_service_cost ?? 0
-    const delta = calcLogistics != null ? calcLogistics - actualLogistics : null
-    const deltaPct = (calcLogistics != null && actualLogistics > 0)
+    // Нет тарифа или объёма → расчётная = фактической (нет отклонения)
+    if (calcLogistics == null) calcLogistics = actualLogistics
+    const delta = hasTariff ? calcLogistics - actualLogistics : null
+    const deltaPct = (hasTariff && actualLogistics > 0)
       ? ((calcLogistics - actualLogistics) / actualLogistics) * 100
       : null
 
-    // Фактическая цена, использованная в расчёте ИРП
-    const effectivePrice = (row.retail_price_with_discount && row.retail_price_with_discount > 0)
-      ? row.retail_price_with_discount
-      : (product?.avg_price_before_spp ?? null)
-
     return {
-      nm_id:             row.nm_id,
-      barcode:           row.barcode,
-      supplier_article:  row.supplier_article ?? product?.vendor_code ?? '—',
-      title:             row.title ?? product?.title ?? '—',
-      warehouse:         row.warehouse ?? '—',
-      volume_liters:     volumeLiters,
-      volume_liters_val: volumeLiters != null ? volumeLiters * 1000 : null,
-      retail_price:      effectivePrice,
-      calc_logistics:    calcLogistics,
-      actual_logistics:  actualLogistics,
-      delta:             delta,
-      delta_pct:         deltaPct,
-      has_tariff:        hasTariff,
-      has_volume:        hasVolume,
-      tariff_coef:       tariff?.delivery_coef_expr ?? null,
+      // Основные поля таблицы
+      nm_id:            row.nm_id,
+      barcode:          row.barcode,
+      supplier_article: row.supplier_article ?? product?.vendor_code ?? '—',
+      title:            row.title ?? product?.title ?? '—',
+      warehouse:        row.warehouse ?? '—',
+      volume_liters:    volumeLiters,
+      retail_price:     priceUsed,
+      calc_logistics:   calcLogistics,
+      actual_logistics: actualLogistics,
+      delta:            delta,
+      delta_pct:        deltaPct,
+      has_tariff:       hasTariff,
+      has_volume:       hasVolume,
+      is_return:        isReturn,
+      tariff_coef:      isReturn ? null : (tariff?.delivery_coef_expr ?? null),
+      // Детализация для раскрытия строки
+      order_date:       row.order_date,
+      sale_date:        row.sale_date,
+      supply_number:    row.supply_number,
+      supply_date:      supplyDate,
+      tariff_type:      tariffType,
+      office_name:      row.office_name,
+      fix_start_date:   row.fix_start_date,
+      fix_end_date:     row.fix_end_date,
+      tariff_warehouse: isReturn ? null : (tariff?.warehouse_name ?? null),
+      tariff_date:      isReturn ? null : (tariff?.loaded_at ? tariff.loaded_at.slice(0, 10) : null),
+      delivery_base:    deliveryBaseUsed,
+      delivery_liter:   deliveryLiterUsed,
+      vol_used:         volUsed,
+      price_used:       priceUsed,
+      tariff_base:      tariffBase,
+      irp_part:         irpPart,
+      il_coef:          isReturn ? null : ilCoef,
+      irp_rate:         isReturn ? null : irpRate,
     }
   })
 
@@ -203,4 +314,9 @@ export async function GET(req: Request) {
     },
     details,
   })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[logistics/check]', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }

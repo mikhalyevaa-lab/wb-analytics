@@ -4,11 +4,13 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Hint } from '@/components/ui/hint'
 
 interface ReturnsSummary {
-  returns_28d: number
-  sales_28d: number
+  days: number
+  returns_nd: number
+  sales_nd: number
   returns_sum: number
-  buyout_rate: number | null
-  low_buyout_sku_count: number
+  return_rate: number | null
+  above_avg_sku_count: number
+  avg_return_rate: number
   is_preliminary: boolean
 }
 
@@ -30,12 +32,7 @@ function PrelimBadge() {
 }
 
 function KpiCard({
-  label,
-  value,
-  sub,
-  color = 'neutral',
-  hint,
-  preliminary,
+  label, value, sub, color = 'neutral', hint, preliminary, onClick,
 }: {
   label: string
   value: string
@@ -43,6 +40,7 @@ function KpiCard({
   color?: 'neutral' | 'green' | 'red' | 'amber'
   hint?: React.ReactNode
   preliminary?: boolean
+  onClick?: () => void
 }) {
   const valueColor = {
     neutral: 'text-zinc-900 dark:text-zinc-100',
@@ -58,17 +56,35 @@ function KpiCard({
           {label}
           {hint && <Hint width={240}>{hint}</Hint>}
         </p>
-        <p className={`text-2xl font-bold mt-1.5 ${valueColor} flex items-center flex-wrap`}>
-          {value}
-          {preliminary && <PrelimBadge />}
-        </p>
+        {onClick ? (
+          <button
+            onClick={onClick}
+            className={`text-2xl font-bold mt-1.5 ${valueColor} flex items-center flex-wrap hover:underline underline-offset-2 cursor-pointer`}
+          >
+            {value}
+            {preliminary && <PrelimBadge />}
+          </button>
+        ) : (
+          <p className={`text-2xl font-bold mt-1.5 ${valueColor} flex items-center flex-wrap`}>
+            {value}
+            {preliminary && <PrelimBadge />}
+          </p>
+        )}
         {sub && <p className="text-xs text-zinc-400 mt-1">{sub}</p>}
       </CardContent>
     </Card>
   )
 }
 
-export function ReturnsKpiCards({ data, loading }: { data: ReturnsSummary | null; loading: boolean }) {
+export function ReturnsKpiCards({
+  data,
+  loading,
+  onClickAboveAvg,
+}: {
+  data: ReturnsSummary | null
+  loading: boolean
+  onClickAboveAvg?: () => void
+}) {
   if (loading || !data) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -79,21 +95,23 @@ export function ReturnsKpiCards({ data, loading }: { data: ReturnsSummary | null
     )
   }
 
-  const buyoutColor = data.buyout_rate == null
+  const returnColor = data.return_rate == null
     ? 'neutral'
-    : data.buyout_rate >= 60 ? 'green'
-    : data.buyout_rate < 40  ? 'red'
-    : 'amber'
+    : data.return_rate <= 3 ? 'green'
+    : data.return_rate <= 7 ? 'amber'
+    : 'red'
+
+  const days = data.days
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       <KpiCard
-        label="Возвратов за 28 дней"
-        value={fmtNum(data.returns_28d)}
-        sub={`из ${fmtNum(data.sales_28d + data.returns_28d)} операций`}
+        label={`Возвратов за ${days} дней`}
+        value={fmtNum(data.returns_nd)}
+        sub={`из ${fmtNum(data.sales_nd + data.returns_nd)} операций`}
         color="neutral"
         preliminary
-        hint={<span>Количество возвратов (is_realization = true, сумма &lt; 0) за последние 28 дней.</span>}
+        hint={<span>Количество возвратов (for_pay &lt; 0) за последние {days} дней.</span>}
       />
       <KpiCard
         label="Сумма возвратов"
@@ -103,25 +121,31 @@ export function ReturnsKpiCards({ data, loading }: { data: ReturnsSummary | null
         preliminary
       />
       <KpiCard
-        label="% выкупа"
-        value={data.buyout_rate != null ? data.buyout_rate.toFixed(1) + ' %' : '—'}
-        sub="выкупы / (выкупы + возвраты)"
-        color={buyoutColor}
+        label="% возврата"
+        value={data.return_rate != null ? data.return_rate.toFixed(1) + ' %' : '—'}
+        sub="возвраты / (продажи + возвраты)"
+        color={returnColor}
         preliminary
         hint={
           <span>
-            <strong>% выкупа</strong><br /><br />
-            Выкупы ÷ (Выкупы + Возвраты) × 100%<br /><br />
-            Зелёный ≥ 60%, красный &lt; 40%.
+            <strong>% возврата</strong><br /><br />
+            Возвраты ÷ (Продажи + Возвраты) × 100%<br /><br />
+            Зелёный ≤ 3%, жёлтый ≤ 7%, красный &gt; 7%.
           </span>
         }
       />
       <KpiCard
-        label="SKU с выкупом < 40%"
-        value={fmtNum(data.low_buyout_sku_count)}
-        sub="мин. 3 продажи за 28 дней"
-        color={data.low_buyout_sku_count > 0 ? 'red' : 'green'}
-        hint={<span>SKU, у которых доля выкупа меньше 40% при минимум 3 продажах за период.</span>}
+        label="SKU выше среднего"
+        value={fmtNum(data.above_avg_sku_count)}
+        sub={`среднее 2026: ${data.avg_return_rate.toFixed(1)}%`}
+        color={data.above_avg_sku_count > 0 ? 'amber' : 'green'}
+        onClick={onClickAboveAvg}
+        hint={
+          <span>
+            SKU периода с % возврата выше среднего за 2026 год ({data.avg_return_rate.toFixed(1)}%).
+            Мин. 3 операции. Нажмите чтобы перейти к списку.
+          </span>
+        }
       />
     </div>
   )

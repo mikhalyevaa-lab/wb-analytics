@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Hint } from '@/components/ui/hint'
 
@@ -24,19 +24,6 @@ function fmtRub(n: number) {
   if (n >= 1_000) return Math.round(n / 1_000) + ' тыс ₽'
   return n.toLocaleString('ru', { maximumFractionDigits: 0 }) + ' ₽'
 }
-function moscowDate(offsetDays = 0) {
-  const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
-  d.setUTCDate(d.getUTCDate() - offsetDays)
-  return d.toISOString().split('T')[0]
-}
-
-const PRESETS = [
-  { label: 'Сегодня', days: 0 },
-  { label: '7 дн',   days: 7 },
-  { label: '14 дн',  days: 14 },
-  { label: '30 дн',  days: 30 },
-  { label: '90 дн',  days: 90 },
-]
 
 function Stat({
   label, value, hint, loading,
@@ -57,66 +44,36 @@ function Stat({
   )
 }
 
-function periodLabel(preset: { label: string; days: number }, dateTo: string) {
-  if (preset.days === 0) {
-    const d = new Date(dateTo + 'T00:00:00')
-    return d.toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })
-  }
-  return `последние ${preset.days} дней`
+interface Props {
+  dateFrom: string
+  dateTo: string
 }
 
-export function TodayCards() {
-  const [activePreset, setActivePreset] = useState(PRESETS[0])
+export function TodayCards({ dateFrom, dateTo }: Props) {
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback((preset: { label: string; days: number }) => {
+  useEffect(() => {
     setLoading(true)
-    const today = moscowDate(0)
-    const from  = preset.days === 0 ? today : moscowDate(preset.days)
-    fetch(`/api/dashboard/stats?from=${from}&to=${today}`)
+    fetch(`/api/dashboard/stats?from=${dateFrom}&to=${dateTo}`)
       .then(r => r.json())
       .then(d => { setStats(d); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }, [dateFrom, dateTo])
 
-  useEffect(() => { load(PRESETS[0]) }, [load])
-
-  function selectPreset(p: { label: string; days: number }) {
-    setActivePreset(p)
-    load(p)
-  }
-
-  const label = stats ? periodLabel(activePreset, stats.dateTo) : '…'
+  const label = dateFrom === dateTo
+    ? new Date(dateFrom + 'T00:00:00').toLocaleDateString('ru', { day: 'numeric', month: 'long' })
+    : `${dateFrom} — ${dateTo}`
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="flex items-center gap-1.5">
-          <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide">
-            {activePreset.days === 0 ? 'Сегодня' : 'Период'} · {label}
-          </h2>
-          <Hint width={300}>
-            <strong>Источник данных</strong><br /><br />
-            Заказы и сумма заказов — воронка продаж WB (обновляется при синхронизации).<br /><br />
-            Реклама и переходы — API рекламы WB. Данные за текущий день могут появляться с задержкой 2–4 часа.
-          </Hint>
-        </div>
-        <div className="flex gap-1">
-          {PRESETS.map(p => (
-            <button
-              key={p.label}
-              onClick={() => selectPreset(p)}
-              className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
-                activePreset.label === p.label
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border text-zinc-500 dark:text-zinc-400 hover:bg-muted'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex items-center gap-1.5 mb-3">
+        <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+          Заказы и реклама · {label}
+        </h2>
+        <Hint width={300}>
+          Заказы и сумма — воронка продаж WB. Реклама и переходы — API рекламы WB. Данные за текущий день могут появляться с задержкой 2–4 часа.
+        </Hint>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">

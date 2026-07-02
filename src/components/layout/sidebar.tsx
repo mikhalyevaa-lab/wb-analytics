@@ -14,8 +14,7 @@ interface NavItem {
 }
 
 const nav: NavItem[] = [
-  { href: '/overview',       label: 'Обзор',                picto: 'overview'       },
-  { href: '/dashboard',      label: 'Дашборд',              picto: 'dashboard'      },
+  { href: '/dashboard',      label: 'Главная',              picto: 'dashboard'      },
   { href: '/catalog',        label: 'Товары',               picto: 'catalog'        },
   { href: '/funnel',         label: 'Воронка',              picto: 'funnel'         },
   { href: '/advertising',    label: 'Реклама',              picto: 'advertising'    },

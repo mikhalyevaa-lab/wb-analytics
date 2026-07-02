@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/auth-server'
 import { redirect } from 'next/navigation'
 import { ImportWizard } from '@/components/import/import-wizard'
 import { WeeklyReportUpload } from '@/components/import/weekly-report-upload'
+import { TariffUpload } from '@/components/logistics/tariff-upload'
 import { PageHeader } from '@/components/ui/page-header'
 
 export default async function ImportPage() {
@@ -68,6 +69,16 @@ export default async function ImportPage() {
           ))}
         </div>
         <ImportWizard />
+      </Section>
+
+      {/* ── Раздел 4: Тарифы складов ── */}
+      <Section
+        badge="4"
+        title="Тарифы складов WB"
+        description="Файл «warehouse coefficients YYYY-MM-DD.xlsx» из ЛК WB. Дата тарифов определяется автоматически из имени файла."
+        hint="Загружайте при каждом изменении тарифов. Нужны для корректного расчёта фиксированной логистики по правилу 90 дней."
+      >
+        <TariffUpload />
       </Section>
     </div>
   )
