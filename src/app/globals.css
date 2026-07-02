@@ -159,3 +159,81 @@
   --wb-chart-5:        #38bdf8;   /* sky     */
   --wb-chart-6:        #a78bfa;   /* violet  */
 }
+
+/* ── Редизайн Steep (Ф0) — новый слой токенов, --wb-* выше пока не трогаем ──
+   ТЗ: "ТЗ - перенос дизайна.dc.html", референс DESIGN (2).md, 2026-07-02 */
+:root {
+  /* Цвет — поверхности и графические заливки (НЕ флипаются ролью, см. --app-text для текста) */
+  --app-ink:          #17191c;
+  --app-white:        #ffffff;
+  --app-fog:          #f7f7f8;
+  --app-ash:          #4c4c4c;
+  --app-graphite:     #777b86;
+  --app-dove:         #a3a6af;
+  --app-rust:         #5d2a1a;
+  --app-apricot-wash: #fbe1d1;
+  --app-sky-wash:     #d3e3fc;
+
+  /* Текст — единственная роль, которая инвертируется в тёмной теме (Ф5) */
+  --app-text: var(--app-ink);
+
+  /* CTA/акцентная заливка (кнопки, активные пилюли) — пара всегда контрастна */
+  --app-cta-bg:   var(--app-ink);
+  --app-cta-text: #ffffff;
+
+  /* Подложка sticky-статус-бара (полупрозрачная поверх контента) */
+  --app-status-bg: rgba(255, 255, 255, .88);
+
+  /* Семантика (рост/внимание/риск) — из ТЗ §3 */
+  --app-positive: #3f6b4f;
+  --app-warn:     #96702a;
+  --app-risk:     #8a3324;
+
+  /* Типографика */
+  --app-font-serif: var(--font-source-serif-4), Georgia, serif;
+  --app-font-sans:  var(--font-hanken-grotesk), system-ui, sans-serif;
+
+  /* Формы */
+  --app-radius-card:   24px;
+  --app-radius-input:  16px;
+  --app-radius-pill:   9999px;
+  --app-shadow-card:   rgba(4, 23, 43, .05) 0px 0px 0px 1px, rgba(0, 0, 0, .1) 0px 20px 25px -5px, rgba(0, 0, 0, .1) 0px 8px 10px -6px;
+
+  /* Отступы (4px база) */
+  --app-space-4:  4px;
+  --app-space-8:  8px;
+  --app-space-12: 12px;
+  --app-space-16: 16px;
+  --app-space-20: 20px;
+  --app-space-24: 24px;
+  --app-space-40: 40px;
+  --app-space-64: 64px;
+  --app-space-80: 80px;
+}
+
+/* ── Редизайн Steep (Ф5) — тёмная тема, вариант «1a Светофор» ──
+   Поверхности и текст инвертируются; --app-ink/--app-rust остаются как есть
+   (заливки кнопок/сегментов диаграмм), т.к. --app-cta-bg/--app-cta-text и
+   --app-text несут флип-роль отдельно от них. */
+.dark {
+  --app-white:        #1c1e22;
+  --app-fog:          #26282d;
+  --app-ash:          #b8b8ba;
+  --app-graphite:     #9a9da5;
+  --app-dove:         #45474c;
+  --app-rust:         #d68a6c;
+  --app-apricot-wash: #3a2a22;
+  --app-sky-wash:     #1f2a3a;
+
+  --app-text:     #f2f1ee;
+  --app-cta-bg:   #f2f1ee;
+  --app-cta-text: #17191c;
+  --app-status-bg: rgba(20, 21, 23, .88);
+
+  --app-positive: #6fae82;
+  --app-warn:     #d1a355;
+  --app-risk:     #d97a63;
+
+  --app-shadow-card: rgba(0, 0, 0, .4) 0px 0px 0px 1px, rgba(0, 0, 0, .3) 0px 20px 25px -5px, rgba(0, 0, 0, .3) 0px 8px 10px -6px;
+}
+.dark body { background: #141517; }

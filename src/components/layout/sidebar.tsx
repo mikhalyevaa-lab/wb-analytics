@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { signOut } from '@/lib/auth-client'
 import { useRole } from '@/contexts/role-context'
 import { Picto, type PictoName } from '@/components/ui/picto'
@@ -39,6 +40,25 @@ export function Sidebar({ storeName }: { storeName?: string }) {
   const pathname = usePathname()
   const router = useRouter()
   const { can, roleLabel, loading: roleLoading } = useRole()
+  // Ленивый инициализатор вместо useEffect — читаем класс .dark, который anti-FOUC
+  // скрипт в layout.tsx уже применил к <html> до гидратации (см. app/layout.tsx)
+  const [isDark, setIsDark] = useState(() => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'))
+
+  // React при гидратации перезаписывает className <html> (suppressHydrationWarning
+  // глушит только предупреждение, не перезапись) — переприменяем класс сразу после маунта.
+  // Без setState — только синхронизация с внешним DOM, лишена смысла лечить set-state-in-effect
+  useEffect(() => {
+    if (localStorage.getItem('wb-theme') === 'dark') {
+      document.documentElement.classList.add('dark')
+    }
+  }, [])
+
+  function toggleTheme() {
+    const next = !isDark
+    setIsDark(next)
+    document.documentElement.classList.toggle('dark', next)
+    localStorage.setItem('wb-theme', next ? 'dark' : 'light')
+  }
 
   async function handleLogout() {
     await signOut()
@@ -104,6 +124,17 @@ export function Sidebar({ storeName }: { storeName?: string }) {
         {!roleLoading && roleLabel && (
           <div className="px-2.5 py-1 text-xs text-zinc-600 truncate">{roleLabel}</div>
         )}
+        <button
+          onClick={toggleTheme}
+          className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+        >
+          {isDark ? (
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none" className="flex-shrink-0"><circle cx="9" cy="9" r="4" stroke="currentColor" strokeWidth="1.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.7 3.7l1.4 1.4M12.9 12.9l1.4 1.4M3.7 14.3l1.4-1.4M12.9 5.1l1.4-1.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 18 18" fill="none" className="flex-shrink-0"><path d="M15.5 10.7A6.5 6.5 0 017.3 2.5a6.5 6.5 0 108.2 8.2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/></svg>
+          )}
+          {isDark ? 'Светлая тема' : 'Тёмная тема'}
+        </button>
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-sm text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
