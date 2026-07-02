@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { Hint } from '@/components/ui/hint'
-import { PageHeader } from '@/components/ui/page-header'
+import { SectionShell } from '@/components/layout/section-shell'
 
 function moscowDate(offsetDays = 0) {
   const d = new Date(Date.now() + 3 * 60 * 60 * 1000)
@@ -171,43 +171,57 @@ export default function FunnelPage() {
   const s = data?.summary
 
   return (
-    <div className="p-6 space-y-6 max-w-[1100px]">
-      <PageHeader picto="funnel" title="Воронка продаж" subtitle="Просмотры → Корзина → Заказы">
-        <Hint width={340}>
-          <strong>Воронка продаж WB</strong><br /><br />
-          Показывает путь покупателя: Просмотр карточки → Добавление в корзину → Заказ → Выкуп.<br /><br />
-          <strong>Источник:</strong> метод аналитики WB (nmReportDetail). Данные агрегируются по дням и хранятся в таблице wb_funnel.<br /><br />
-          <strong>Важно:</strong> WB отдаёт данные с задержкой 1–2 дня. Данные за сегодня могут быть неполными.
-        </Hint>
-        {syncLabel && <span className="text-xs text-zinc-500">данные по {syncLabel}</span>}
+    <SectionShell maxWidth={1100}>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div className="flex items-start gap-2">
+          <div>
+            <p className="text-[13px] font-semibold uppercase tracking-wider" style={{ color: 'var(--app-graphite)' }}>Продажи</p>
+            <h1 style={{ fontFamily: 'var(--app-font-serif)', fontSize: 32, color: 'var(--app-text)', marginTop: 4 }}>Воронка продаж</h1>
+            <p className="text-[14px] mt-1" style={{ color: 'var(--app-graphite)' }}>
+              Просмотры → Корзина → Заказы{syncLabel ? ` · данные по ${syncLabel}` : ''}
+            </p>
+          </div>
+          <Hint width={340}>
+            <strong>Воронка продаж WB</strong><br /><br />
+            Показывает путь покупателя: Просмотр карточки → Добавление в корзину → Заказ → Выкуп.<br /><br />
+            <strong>Источник:</strong> метод аналитики WB (nmReportDetail). Данные агрегируются по дням и хранятся в таблице wb_funnel.<br /><br />
+            <strong>Важно:</strong> WB отдаёт данные с задержкой 1–2 дня. Данные за сегодня могут быть неполными.
+          </Hint>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
         {PRESETS.map(p => (
           <button key={p.label} onClick={() => applyPreset(p.label, p.days)}
-            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-              activePreset === p.label
-                ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-900'
-                : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-            }`}>
+            className="px-3 py-1.5 text-[14px] rounded-full transition-colors"
+            style={{
+              background: activePreset === p.label ? 'var(--app-cta-bg)' : 'transparent',
+              color: activePreset === p.label ? 'var(--app-cta-text)' : 'var(--app-graphite)',
+              border: activePreset === p.label ? 'none' : '1px solid var(--app-dove)',
+            }}>
             {p.label}
           </button>
         ))}
         <div className="flex items-center gap-1">
           <input type="date" value={dateFrom}
             onChange={e => { setDateFrom(e.target.value); setActivePreset('') }}
-            className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="px-2 py-1.5 text-[14px] rounded-lg"
+            style={{ border: '1px solid var(--app-dove)' }}
           />
-          <span className="text-zinc-400">—</span>
+          <span style={{ color: 'var(--app-dove)' }}>—</span>
           <input type="date" value={dateTo}
             onChange={e => { setDateTo(e.target.value); setActivePreset('') }}
-            className="px-2 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="px-2 py-1.5 text-[14px] rounded-lg"
+            style={{ border: '1px solid var(--app-dove)' }}
           />
           {!activePreset && (
             <button onClick={() => load(dateFrom, dateTo, aggLevel)}
-              className="px-3 py-1.5 text-sm bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 text-white rounded-lg transition-colors">
+              className="px-3.5 py-1.5 text-[14px] rounded-full" style={{ background: 'var(--app-cta-bg)', color: 'var(--app-cta-text)' }}>
               Применить
             </button>
           )}
         </div>
-      </PageHeader>
+      </div>
 
       {error && (
         <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3 text-sm text-red-700 dark:text-red-400">{error}</div>
@@ -573,6 +587,6 @@ export default function FunnelPage() {
           </div>
         </div>
       )}
-    </div>
+    </SectionShell>
   )
 }

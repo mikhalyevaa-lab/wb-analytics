@@ -6,8 +6,8 @@ import { DeductionsSection } from '@/components/pnl/deductions-section'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ExportButton } from '@/components/export-button'
 import Link from 'next/link'
-import { PageHeader } from '@/components/ui/page-header'
 import { WaterfallChart } from '@/components/pnl/waterfall-chart'
+import { SectionShell } from '@/components/layout/section-shell'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,16 +89,24 @@ export default async function PnLPage({
   const noData = wb.sale === 0
 
   return (
-    <div className="p-6 space-y-6 max-w-[760px]">
-      <PageHeader picto="pnl" title="P&L отчёт" subtitle={label}>
-        <ExportButton href={`/api/export/pnl?from=${from}&to=${to}`} />
-        <Link
-          href="/costs"
-          className="px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-        >
-          + Добавить затраты
-        </Link>
-      </PageHeader>
+    <SectionShell maxWidth={760}>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-[13px] font-semibold uppercase tracking-wider" style={{ color: 'var(--app-graphite)' }}>Финансы</p>
+          <h1 style={{ fontFamily: 'var(--app-font-serif)', fontSize: 32, color: 'var(--app-text)', marginTop: 4 }}>P&L отчёт</h1>
+          <p className="text-[14px] mt-1" style={{ color: 'var(--app-graphite)' }}>{label}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ExportButton href={`/api/export/pnl?from=${from}&to=${to}`} />
+          <Link
+            href="/costs"
+            className="px-3.5 py-1.5 text-[14px] rounded-full transition-colors"
+            style={{ border: '1px solid var(--app-dove)', color: 'var(--app-text)' }}
+          >
+            + Добавить затраты
+          </Link>
+        </div>
+      </div>
 
       {/* Period selector */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -106,11 +114,12 @@ export default async function PnLPage({
           <a
             key={p.value}
             href={`/pnl?period=${p.value}`}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              preset === p.value
-                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400'
-            }`}
+            className="px-3 py-1.5 text-[14px] rounded-full transition-colors"
+            style={{
+              background: preset === p.value ? 'var(--app-cta-bg)' : 'transparent',
+              color: preset === p.value ? 'var(--app-cta-text)' : 'var(--app-graphite)',
+              border: preset === p.value ? 'none' : '1px solid var(--app-dove)',
+            }}
           >
             {p.label}
           </a>
@@ -122,18 +131,21 @@ export default async function PnLPage({
             type="date"
             name="from"
             defaultValue={from}
-            className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+            className="text-[14px] px-2 py-1.5 rounded-lg"
+            style={{ border: '1px solid var(--app-dove)' }}
           />
-          <span className="text-zinc-400 text-xs">—</span>
+          <span style={{ color: 'var(--app-dove)' }}>—</span>
           <input
             type="date"
             name="to"
             defaultValue={to}
-            className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+            className="text-[14px] px-2 py-1.5 rounded-lg"
+            style={{ border: '1px solid var(--app-dove)' }}
           />
           <button
             type="submit"
-            className="px-3 py-1.5 text-xs bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg hover:opacity-90"
+            className="px-3.5 py-1.5 text-[14px] rounded-full"
+            style={{ background: 'var(--app-cta-bg)', color: 'var(--app-cta-text)' }}
           >
             Применить
           </button>
@@ -180,6 +192,6 @@ export default async function PnLPage({
           <DeductionsSection dateFrom={from} dateTo={to} />
         </CardContent>
       </Card>
-    </div>
+    </SectionShell>
   )
 }
