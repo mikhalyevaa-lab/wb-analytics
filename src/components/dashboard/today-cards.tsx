@@ -56,7 +56,7 @@ export function TodayCards({ dateFrom, dateTo }: Props) {
   useEffect(() => {
     setLoading(true)
     fetch(`/api/dashboard/stats?from=${dateFrom}&to=${dateTo}`)
-      .then(r => r.json())
+      .then(r => r.ok ? r.json() : null)
       .then(d => { setStats(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [dateFrom, dateTo])
