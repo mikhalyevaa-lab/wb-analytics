@@ -167,6 +167,45 @@ export async function getDataQualityAlerts(storeIds: string[]): Promise<DataQual
   return { missingCost:Number(countRow[0].c), missingToken:!storeRow[0]?.wb_analytics_token }
 }
 
+export interface AbcClassShare { count: number; skuShare: number; revenueShare: number }
+export interface AbcShares { A: AbcClassShare; B: AbcClassShare; C: AbcClassShare; totalSku: number }
+
+/** Лёгкая ABC-R агрегация (только по выручке, без ABC-M/маржи) — для диаграммы "ABC-вклад" на Обзоре */
+export async function getAbcRevenueShares(storeIds: string[], dateFrom: string, dateTo: string): Promise<AbcShares> {
+  const empty = { count: 0, skuShare: 0, revenueShare: 0 }
+  if (!storeIds.length) return { A: empty, B: empty, C: empty, totalSku: 0 }
+
+  const rows = await db<{ nm_id: number; revenue: number }[]>`
+    SELECT nm_id, COALESCE(SUM(finished_price), 0) revenue
+    FROM wb_sales
+    WHERE store_id = ANY(${storeIds}) AND sale_id LIKE 'S%'
+      AND "date" >= ${dateFrom}::date AND "date" <= ${dateTo}::date + INTERVAL '1 day'
+    GROUP BY nm_id HAVING COALESCE(SUM(finished_price), 0) > 0`
+
+  if (!rows.length) return { A: empty, B: empty, C: empty, totalSku: 0 }
+
+  const sorted = rows.map(r => ({ nm_id: r.nm_id, revenue: Number(r.revenue) })).sort((a, b) => b.revenue - a.revenue)
+  const totalRevenue = sorted.reduce((s, r) => s + r.revenue, 0)
+  const totalSku = sorted.length
+
+  let cumulative = 0
+  const counts = { A: 0, B: 0, C: 0 }
+  const revenues = { A: 0, B: 0, C: 0 }
+  for (const r of sorted) {
+    cumulative += r.revenue
+    const share = totalRevenue > 0 ? cumulative / totalRevenue : 0
+    const cls: 'A' | 'B' | 'C' = share <= 0.80 ? 'A' : share <= 0.95 ? 'B' : 'C'
+    counts[cls] += 1
+    revenues[cls] += r.revenue
+  }
+  const mk = (cls: 'A' | 'B' | 'C'): AbcClassShare => ({
+    count: counts[cls],
+    skuShare: totalSku > 0 ? Math.round((counts[cls] / totalSku) * 1000) / 10 : 0,
+    revenueShare: totalRevenue > 0 ? Math.round((revenues[cls] / totalRevenue) * 1000) / 10 : 0,
+  })
+  return { A: mk('A'), B: mk('B'), C: mk('C'), totalSku }
+}
+
 export async function getOverviewDailySales(storeIds: string[]) {
   if (!storeIds.length) return []
   const rows = await db<{date:string,orders:number,revenue:number}[]>`

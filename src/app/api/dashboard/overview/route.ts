@@ -9,6 +9,7 @@ import {
   getYesterdayOrders,
   getStocksAlerts,
   getDataQualityAlerts,
+  getAbcRevenueShares,
 } from '@/lib/queries-overview'
 
 export const dynamic = 'force-dynamic'
@@ -33,12 +34,19 @@ export async function GET(req: NextRequest) {
   const fromTs = dateFrom + 'T00:00:00.000Z'
   const toTs   = dateTo   + 'T23:59:59.999Z'
 
-  const [finance, insights, yesterday, stocks, quality, salesRows, orderRows, tasksRes] = await Promise.all([
+  // Предыдущий период той же длины — для дельты в VerdictBand/GlobalStatusBar
+  const periodMs   = new Date(dateTo).getTime() - new Date(dateFrom).getTime()
+  const prevDateTo   = new Date(new Date(dateFrom).getTime() - 86400000).toISOString().split('T')[0]
+  const prevDateFrom = new Date(new Date(dateFrom).getTime() - periodMs - 86400000).toISOString().split('T')[0]
+
+  const [finance, financePrev, insights, yesterday, stocks, quality, abc, salesRows, orderRows, tasksRes] = await Promise.all([
     getOverviewFinance(storeIds, dateFrom, dateTo),
+    getOverviewFinance(storeIds, prevDateFrom, prevDateTo),
     getInsights(storeIds, dateFrom, dateTo),
     getYesterdayOrders(storeIds),
     getStocksAlerts(storeIds),
     getDataQualityAlerts(storeIds),
+    getAbcRevenueShares(storeIds, dateFrom, dateTo),
     // Выкупы по дням за период
     db<{ day: string; revenue: number; sales: number }[]>`
       SELECT date_trunc('day', "date")::text AS day,
@@ -88,10 +96,12 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     finance,
+    financePrev,
     insights,
     yesterday,
     stocks,
     quality,
+    abc,
     dailySales,
     tasks,
     criticalTaskCount: tasks.filter(t => t.priority === 'critical' || t.priority === 'high').length,
